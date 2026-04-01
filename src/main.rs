@@ -26,8 +26,18 @@ fn main() {
 
     let file_args: Vec<&String> = args
         .iter()
-        .filter(|a| *a != "--jsc" && *a != "--manual")
+        .filter(|a| *a != "--jsc" && *a != "--manual" && *a != "--help")
         .collect();
+
+    if args.iter().any(|a| a == "--help") {
+        println!("Usage: ravel [OPTIONS] [FILE]");
+        println!();
+        println!("Options:");
+        println!("  --jsc      Use JavaScriptCore backend (default)");
+        println!("  --manual   Use manual interpreter backend");
+        println!("  --help     Show this help message");
+        return;
+    }
 
     if file_args.len() > 1 {
         let filename = file_args[1];
