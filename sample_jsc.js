@@ -1,11 +1,11 @@
 // Sample JavaScript for JavaScriptCore backend
-// Showcases features the manual backend doesn't support yet
+// Showcases ES6+ features not supported by the manual toy interpreter
 
 console.log("=== Arrow Functions ===");
 const add = (a, b) => a + b;
 console.log("5 + 3 =", add(5, 3));
 
-const square = x => x * x;
+const square = (x) => x * x;
 console.log("square(7) =", square(7));
 
 // Template literals
@@ -18,10 +18,10 @@ console.log(`2 + 2 = ${2 + 2}`);
 // Array methods
 console.log("=== Array Methods ===");
 const nums = [1, 2, 3, 4, 5];
-console.log("map:", nums.map(x => x * 2));
-console.log("filter:", nums.filter(x => x > 3));
+console.log("map:", nums.map((x) => x * 2));
+console.log("filter:", nums.filter((x) => x > 3));
 console.log("reduce:", nums.reduce((a, b) => a + b, 0));
-console.log("find:", nums.find(x => x === 4));
+console.log("find:", nums.find((x) => x === 4));
 
 // Math
 console.log("=== Math ===");
@@ -79,10 +79,10 @@ console.log(dog.speak());
 
 // Promises
 console.log("=== Promises ===");
-const p = new Promise(resolve => {
+const p = new Promise((resolve) => {
   setTimeout(() => resolve("done!"), 100);
 });
-p.then(result => console.log("Promise:", result));
+p.then((result) => console.log("Promise:", result));
 
 // JSON
 console.log("=== JSON ===");
