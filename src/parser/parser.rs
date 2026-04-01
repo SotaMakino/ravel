@@ -89,7 +89,26 @@ impl Parser {
         let init = if self.match_token(&Token::Semicolon) {
             None
         } else {
-            let stmt = self.statement()?;
+            let stmt = if self.matches(&[Token::Let, Token::Const, Token::Var]) {
+                let kind = match self.advance() {
+                    Token::Let => VarKind::Let,
+                    Token::Const => VarKind::Const,
+                    Token::Var => VarKind::Var,
+                    _ => unreachable!(),
+                };
+                let name = match self.advance() {
+                    Token::Ident(n) => n,
+                    t => return Err(format!("Expected identifier, got {}", t)),
+                };
+                let init = if self.match_token(&Token::Eq) {
+                    Some(Box::new(self.expression()?))
+                } else {
+                    None
+                };
+                AstNode::VarDecl { name, kind, init }
+            } else {
+                self.expression()?
+            };
             self.consume(&Token::Semicolon)?;
             Some(Box::new(stmt))
         };
@@ -193,7 +212,10 @@ impl Parser {
         if self.match_token(&Token::Eq) {
             let name = match &expr {
                 AstNode::Ident(n) => n.clone(),
-                AstNode::MemberAccess { object, property } => {
+                AstNode::MemberAccess {
+                    object: _,
+                    property: _,
+                } => {
                     return Ok(AstNode::Assign {
                         name: format!("[member]"),
                         value: Box::new(self.assignment()?),
@@ -597,7 +619,7 @@ mod tests {
                 match &stmts[0] {
                     AstNode::If {
                         cond,
-                        then_branch,
+                        then_branch: _,
                         else_branch,
                     } => {
                         assert_eq!(**cond, AstNode::BoolLit(true));
@@ -617,7 +639,11 @@ mod tests {
             AstNode::Block(stmts) => {
                 assert_eq!(stmts.len(), 1);
                 match &stmts[0] {
-                    AstNode::FuncDecl { name, params, body } => {
+                    AstNode::FuncDecl {
+                        name,
+                        params,
+                        body: _,
+                    } => {
                         assert_eq!(name, "add");
                         assert_eq!(params, &["a".to_string(), "b".to_string()]);
                     }
@@ -710,7 +736,7 @@ mod tests {
             AstNode::Block(stmts) => {
                 assert_eq!(stmts.len(), 1);
                 match &stmts[0] {
-                    AstNode::While { cond, body } => {
+                    AstNode::While { cond, body: _ } => {
                         assert_eq!(**cond, AstNode::BoolLit(true));
                     }
                     _ => panic!("Expected while"),

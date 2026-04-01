@@ -37,7 +37,11 @@ impl<'a> Interpreter<'a> {
                 self.eval_unary(op, &v)
             }
 
-            AstNode::VarDecl { name, kind, init } => {
+            AstNode::VarDecl {
+                name,
+                kind: _,
+                init,
+            } => {
                 let value = match init {
                     Some(i) => self.execute(i)?,
                     None => Value::Undefined,
