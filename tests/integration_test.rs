@@ -153,24 +153,8 @@ fn test_closure() {
 }
 
 #[test]
-fn test_lexer_error() {
-    let (_out, err) = run_ravel(&["--manual"]);
-    // This test requires manual backend; JSC handles errors differently
-    // Skipping for now as default is JSC
-    let _ = err;
-}
-
-#[test]
-fn test_undefined_var_error() {
-    let (_out, err) = run_ravel(&["--manual"]);
-    // This test requires manual backend; JSC handles errors differently
-    // Skipping for now as default is JSC
-    let _ = err;
-}
-
-#[test]
 fn test_jsc_backend() {
-    let (out, _err) = run_ravel(&["--jsc", "sample_jsc.js"]);
+    let (out, _err) = run_ravel(&["sample_jsc.js"]);
     assert!(out.contains("Arrow Functions"));
     assert!(out.contains("Template Literals"));
     assert!(out.contains("Array Methods"));
@@ -183,4 +167,22 @@ fn test_jsc_backend() {
     assert!(out.contains("Try/Catch"));
     assert!(out.contains("Spread"));
     assert!(out.contains("All done!"));
+}
+
+#[cfg(feature = "manual")]
+mod manual_tests {
+    use super::*;
+
+    #[test]
+    fn test_manual_hello_world() {
+        let (out, err) = run_ravel(&["--manual", "sample.js"]);
+        assert_eq!(err, "");
+        assert!(out.contains("Hello"));
+    }
+
+    #[test]
+    fn test_manual_arithmetic() {
+        let (out, err) = run_ravel(&["--manual"]);
+        let _ = (out, err);
+    }
 }

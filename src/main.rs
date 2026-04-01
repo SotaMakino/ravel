@@ -1,13 +1,27 @@
 use std::env;
 use std::fs;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use ravel::builtins::create_console;
-use ravel::env::Env;
-use ravel::interpreter::Interpreter;
-use ravel::jsc::{evaluate_script, function_callback, JSContext, JSException, JSValue};
-use ravel::lexer::lexer::Lexer;
-use ravel::parser::parser::Parser;
+use javascriptcore::JSContext;
+use ravel::jsc::timers::{JscTimerBridge, set_timer_bridge};
+use ravel::jsc::setup_full_environment;
 use rustyline::DefaultEditor;
+
+#[cfg(feature = "manual")]
+use ravel::builtins::{create_console, create_timer_globals};
+#[cfg(feature = "manual")]
+use ravel::env::Env;
+#[cfg(feature = "manual")]
+use ravel::interpreter::Interpreter;
+#[cfg(feature = "manual")]
+use ravel::lexer::lexer::Lexer;
+#[cfg(feature = "manual")]
+use ravel::parser::parser::Parser;
+#[cfg(feature = "manual")]
+use ravel::timer::TimerState;
+#[cfg(feature = "manual")]
+use tokio::runtime::Runtime;
 
 #[derive(Debug, PartialEq)]
 enum Backend {
@@ -34,7 +48,7 @@ fn main() {
         println!();
         println!("Options:");
         println!("  --jsc      Use JavaScriptCore backend (default)");
-        println!("  --manual   Use manual interpreter backend");
+        println!("  --manual   Use manual interpreter backend (experimental)");
         println!("  --help     Show this help message");
         return;
     }
@@ -51,12 +65,59 @@ fn main() {
 
 fn run(source: &str, backend: &Backend) {
     match backend {
+        #[cfg(feature = "manual")]
         Backend::Manual => run_manual(source),
+        #[cfg(not(feature = "manual"))]
+        Backend::Manual => {
+            eprintln!("Manual backend not compiled. Rebuild with: cargo build --features manual");
+        }
         Backend::JavaScriptCore => run_jsc(source),
     }
 }
 
+fn run_jsc(source: &str) {
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let handle = rt.handle().clone();
+
+    rt.block_on(async {
+        let ctx = JSContext::default();
+
+        let timer_bridge = Arc::new(Mutex::new(JscTimerBridge::new(ctx, handle.clone())));
+        set_timer_bridge(timer_bridge.clone());
+
+        {
+            let bridge = timer_bridge.lock().unwrap();
+            match setup_full_environment(&bridge.ctx) {
+                Ok(_) => {}
+                Err(e) => eprintln!("Environment setup error: {}", e),
+            }
+        }
+
+        let eval_result = {
+            let bridge = timer_bridge.lock().unwrap();
+            javascriptcore::evaluate_script(&bridge.ctx, source, None, "ravel.js", 1)
+        };
+        match eval_result {
+            Ok(val) => {
+                if let Ok(s) = val.as_string() {
+                    println!("{}", s);
+                }
+            }
+            Err(e) => eprintln!("JavaScriptCore error: {}", e),
+        }
+
+        let timer_state = timer_bridge.lock().unwrap().state.clone();
+        while timer_state.has_pending() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    });
+}
+
+#[cfg(feature = "manual")]
 fn run_manual(source: &str) {
+    let rt = Runtime::new().expect("Failed to create tokio runtime");
+    let handle = rt.handle().clone();
+
     let lexer = Lexer::new(source);
     let tokens = match lexer.tokenize() {
         Ok(tokens) => tokens,
@@ -77,52 +138,23 @@ fn run_manual(source: &str) {
 
     let mut env = Env::new();
     env.define("console", create_console());
+
+    let timer_state = TimerState::new();
+    for (name, value) in create_timer_globals(timer_state.clone(), handle.clone(), &mut env as *mut Env) {
+        env.define(&name, value);
+    }
+
     let mut interp = Interpreter::new(&mut env);
     match interp.execute(&ast) {
         Ok(_) => {}
         Err(e) => eprintln!("Runtime error: {}", e),
     }
-}
 
-#[function_callback]
-fn jsc_console_log(
-    ctx: &JSContext,
-    _function: Option<&JSObject>,
-    _this_object: Option<&JSObject>,
-    arguments: &[JSValue],
-) -> Result<JSValue, JSException> {
-    let parts: Vec<String> = arguments
-        .iter()
-        .filter_map(|v| v.as_string().ok().map(|s| s.to_string()))
-        .collect();
-    println!("{}", parts.join(" "));
-    Ok(JSValue::new_undefined(ctx))
-}
-
-fn setup_jsc_console(ctx: &JSContext) -> JSValue {
-    let obj = JSValue::new_array(ctx, &[]).unwrap().as_object().unwrap();
-    obj.set_property(
-        "log",
-        JSValue::new_function(ctx, "log", Some(jsc_console_log)),
-    )
-    .unwrap();
-    JSValue::from(obj)
-}
-
-fn run_jsc(source: &str) {
-    let ctx = JSContext::default();
-    let console = setup_jsc_console(&ctx);
-    let global = ctx.global_object().unwrap();
-    global.set_property("console", console).unwrap();
-
-    match evaluate_script(&ctx, source, None, "ravel.js", 1) {
-        Ok(val) => {
-            if let Ok(s) = val.as_string() {
-                println!("{}", s);
-            }
+    rt.block_on(async {
+        while timer_state.has_pending() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        Err(e) => eprintln!("JavaScriptCore error: {}", e),
-    }
+    });
 }
 
 fn repl(backend: &Backend) {
@@ -135,72 +167,120 @@ fn repl(backend: &Backend) {
     let _ = rl.load_history(&history_path);
 
     match backend {
+        #[cfg(feature = "manual")]
+        Backend::Manual => repl_manual(&mut rl, &history_path),
+        #[cfg(not(feature = "manual"))]
         Backend::Manual => {
-            let mut env = Env::new();
-            env.define("console", create_console());
-
-            println!("ravel v0.2.0 (toy JS runtime) [manual backend]");
-
-            loop {
-                let line = match rl.readline("> ") {
-                    Ok(line) => line,
-                    Err(_) => break,
-                };
-
-                let _ = rl.add_history_entry(&line);
-
-                let lexer = Lexer::new(&line);
-                let tokens = match lexer.tokenize() {
-                    Ok(tokens) => tokens,
-                    Err(e) => {
-                        eprintln!("Lexer error: {}", e);
-                        continue;
-                    }
-                };
-
-                let parser = Parser::new(tokens);
-                let ast = match parser.parse() {
-                    Ok(ast) => ast,
-                    Err(e) => {
-                        eprintln!("Parser error: {}", e);
-                        continue;
-                    }
-                };
-
-                let mut interp = Interpreter::new(&mut env);
-                match interp.execute(&ast) {
-                    Ok(val) => println!("{}", val),
-                    Err(e) => eprintln!("Runtime error: {}", e),
-                }
-            }
+            eprintln!("Manual backend not compiled. Rebuild with: cargo build --features manual");
         }
-        Backend::JavaScriptCore => {
-            let ctx = JSContext::default();
-            let console = setup_jsc_console(&ctx);
-            let global = ctx.global_object().unwrap();
-            global.set_property("console", console).unwrap();
+        Backend::JavaScriptCore => repl_jsc(&mut rl, &history_path),
+    }
+}
 
-            println!("ravel v0.2.0 (toy JS runtime) [JavaScriptCore backend]");
+#[cfg(feature = "manual")]
+fn repl_manual(rl: &mut DefaultEditor, history_path: &std::path::Path) {
+    let rt = Runtime::new().expect("Failed to create tokio runtime");
+    let handle = rt.handle().clone();
 
-            loop {
-                let line = match rl.readline("> ") {
-                    Ok(line) => line,
-                    Err(_) => break,
-                };
+    let mut env = Env::new();
+    env.define("console", create_console());
 
-                let _ = rl.add_history_entry(&line);
-
-                match evaluate_script(&ctx, line.as_str(), None, "repl.js", 1) {
-                    Ok(val) => {
-                        if let Ok(s) = val.as_string() {
-                            println!("{}", s);
-                        }
-                    }
-                    Err(e) => eprintln!("JavaScriptCore error: {}", e),
-                }
-            }
-        }
+    let timer_state = TimerState::new();
+    for (name, value) in create_timer_globals(timer_state.clone(), handle.clone(), &mut env as *mut Env) {
+        env.define(&name, value);
     }
 
-    let _ = rl.save_history(&history_path);
+    println!("ravel v0.3.0 (toy JS runtime) [manual backend]");
+
+    loop {
+        let line = match rl.readline("> ") {
+            Ok(line) => line,
+            Err(_) => break,
+        };
+
+        let _ = rl.add_history_entry(&line);
+
+        let lexer = Lexer::new(&line);
+        let tokens = match lexer.tokenize() {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                eprintln!("Lexer error: {}", e);
+                continue;
+            }
+        };
+
+        let parser = Parser::new(tokens);
+        let ast = match parser.parse() {
+            Ok(ast) => ast,
+            Err(e) => {
+                eprintln!("Parser error: {}", e);
+                continue;
+            }
+        };
+
+        let mut interp = Interpreter::new(&mut env);
+        match interp.execute(&ast) {
+            Ok(val) => println!("{}", val),
+            Err(e) => eprintln!("Runtime error: {}", e),
+        }
+
+        rt.block_on(async {
+            while timer_state.has_pending() {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        });
+    }
+
+    let _ = rl.save_history(history_path);
+}
+
+fn repl_jsc(rl: &mut DefaultEditor, history_path: &std::path::Path) {
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let handle = rt.handle().clone();
+
+    rt.block_on(async {
+        let ctx = JSContext::default();
+
+        let timer_bridge = Arc::new(Mutex::new(JscTimerBridge::new(ctx, handle.clone())));
+        set_timer_bridge(timer_bridge.clone());
+
+        {
+            let bridge = timer_bridge.lock().unwrap();
+            match setup_full_environment(&bridge.ctx) {
+                Ok(_) => {}
+                Err(e) => eprintln!("Environment setup error: {}", e),
+            }
+        }
+
+        println!("ravel v0.3.0 (toy JS runtime) [JavaScriptCore backend]");
+
+        loop {
+            let line = match rl.readline("> ") {
+                Ok(line) => line,
+                Err(_) => break,
+            };
+
+            let _ = rl.add_history_entry(&line);
+
+            let eval_result = {
+                let bridge = timer_bridge.lock().unwrap();
+                javascriptcore::evaluate_script(&bridge.ctx, line.as_str(), None, "repl.js", 1)
+            };
+            match eval_result {
+                Ok(val) => {
+                    if let Ok(s) = val.as_string() {
+                        println!("{}", s);
+                    }
+                }
+                Err(e) => eprintln!("JavaScriptCore error: {}", e),
+            }
+
+            let timer_state = timer_bridge.lock().unwrap().state.clone();
+            while timer_state.has_pending() {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+    });
+
+    let _ = rl.save_history(history_path);
 }

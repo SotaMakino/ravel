@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+pub type BuiltinFn = Arc<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync>;
+
+#[derive(Clone)]
 pub enum Value {
     Number(f64),
     Str(String),
@@ -14,7 +17,23 @@ pub enum Value {
         params: Vec<String>,
         body: crate::parser::ast::AstNode,
     },
-    Builtin(fn(&[Value]) -> Result<Value, String>),
+    Builtin(BuiltinFn),
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Number(n) => write!(f, "Number({})", n),
+            Value::Str(s) => write!(f, "Str({:?})", s),
+            Value::Bool(b) => write!(f, "Bool({})", b),
+            Value::Null => write!(f, "Null"),
+            Value::Undefined => write!(f, "Undefined"),
+            Value::Object(_) => write!(f, "Object(...)"),
+            Value::Array(items) => write!(f, "Array({:?})", items),
+            Value::Func { params, .. } => write!(f, "Func({:?})", params),
+            Value::Builtin(_) => write!(f, "Builtin"),
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -118,10 +137,8 @@ mod tests {
 
     #[test]
     fn test_display_builtin() {
-        assert_eq!(
-            format!("{}", Value::Builtin(|_| Ok(Value::Undefined))),
-            "[builtin]"
-        );
+        let f: BuiltinFn = Arc::new(|_| Ok(Value::Undefined));
+        assert_eq!(format!("{}", Value::Builtin(f)), "[builtin]");
     }
 
     #[test]
