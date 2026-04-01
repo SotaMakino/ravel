@@ -1,6 +1,5 @@
 use std::env;
 use std::fs;
-use std::io::{self, BufRead, Write};
 
 use ravel::builtins::create_console;
 use ravel::env::Env;
@@ -8,6 +7,7 @@ use ravel::interpreter::Interpreter;
 use ravel::jsc::{evaluate_script, function_callback, JSContext, JSException, JSValue};
 use ravel::lexer::lexer::Lexer;
 use ravel::parser::parser::Parser;
+use rustyline::DefaultEditor;
 
 #[derive(Debug, PartialEq)]
 enum Backend {
@@ -18,13 +18,16 @@ enum Backend {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let backend = if args.iter().any(|a| a == "--jsc") {
-        Backend::JavaScriptCore
-    } else {
+    let backend = if args.iter().any(|a| a == "--manual") {
         Backend::Manual
+    } else {
+        Backend::JavaScriptCore
     };
 
-    let file_args: Vec<&String> = args.iter().filter(|a| *a != "--jsc").collect();
+    let file_args: Vec<&String> = args
+        .iter()
+        .filter(|a| *a != "--jsc" && *a != "--manual")
+        .collect();
 
     if file_args.len() > 1 {
         let filename = file_args[1];
@@ -113,8 +116,13 @@ fn run_jsc(source: &str) {
 }
 
 fn repl(backend: &Backend) {
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
+    let mut rl = DefaultEditor::new().expect("Failed to initialize readline");
+
+    let history_path = dirs::config_dir()
+        .unwrap_or_default()
+        .join("ravel")
+        .join("history");
+    let _ = rl.load_history(&history_path);
 
     match backend {
         Backend::Manual => {
@@ -123,14 +131,13 @@ fn repl(backend: &Backend) {
 
             println!("ravel v0.2.0 (toy JS runtime) [manual backend]");
 
-            for line in stdin.lock().lines() {
-                print!("> ");
-                stdout.flush().unwrap();
-
-                let line = match line {
-                    Ok(l) => l,
+            loop {
+                let line = match rl.readline("> ") {
+                    Ok(line) => line,
                     Err(_) => break,
                 };
+
+                let _ = rl.add_history_entry(&line);
 
                 let lexer = Lexer::new(&line);
                 let tokens = match lexer.tokenize() {
@@ -165,14 +172,13 @@ fn repl(backend: &Backend) {
 
             println!("ravel v0.2.0 (toy JS runtime) [JavaScriptCore backend]");
 
-            for line in stdin.lock().lines() {
-                print!("> ");
-                stdout.flush().unwrap();
-
-                let line = match line {
-                    Ok(l) => l,
+            loop {
+                let line = match rl.readline("> ") {
+                    Ok(line) => line,
                     Err(_) => break,
                 };
+
+                let _ = rl.add_history_entry(&line);
 
                 match evaluate_script(&ctx, line.as_str(), None, "repl.js", 1) {
                     Ok(val) => {
@@ -185,4 +191,6 @@ fn repl(backend: &Backend) {
             }
         }
     }
+
+    let _ = rl.save_history(&history_path);
 }

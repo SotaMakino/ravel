@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 javascriptcore = "0.0.6"
+rustyline = "14.0"
+dirs = "5.0"
