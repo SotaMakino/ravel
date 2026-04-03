@@ -18,6 +18,20 @@ fn run_file(name: &str, source: &str) -> (String, String) {
     result
 }
 
+fn run_file_with_deps(name: &str, source: &str, deps: &[(&str, &str)]) -> (String, String) {
+    let dir = std::env::temp_dir().join(format!("ravel_test_{}", name));
+    std::fs::create_dir_all(&dir).expect("Failed to create test dir");
+    for (dep_name, dep_source) in deps {
+        let dep_path = dir.join(dep_name);
+        std::fs::write(&dep_path, dep_source).expect("Failed to write dep file");
+    }
+    let main_path = dir.join(name);
+    std::fs::write(&main_path, source).expect("Failed to write main file");
+    let result = run_ravel(&[main_path.to_str().unwrap()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
 #[test]
 fn test_hello_world() {
     let (out, err) = run_file("hello.js", "console.log(\"Hello, world!\");");
@@ -164,4 +178,57 @@ fn test_quickjs_backend() {
     assert!(out.contains("Math"));
     assert!(out.contains("JSON"));
     assert!(out.contains("Done"));
+}
+
+#[test]
+fn test_esm_named_import() {
+    let (out, err) = run_file_with_deps(
+        "esm_main.js",
+        r#"
+            import { add } from "./math.js";
+            console.log(add(3, 4));
+        "#,
+        &[("math.js", "export function add(a, b) { return a + b; }")],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("7"));
+}
+
+#[test]
+fn test_esm_default_import() {
+    let (out, err) = run_file_with_deps(
+        "esm_default_main.js",
+        r#"
+            import greet from "./greet.js";
+            console.log(greet("World"));
+        "#,
+        &[(
+            "greet.js",
+            "export default function(name) { return `Hello, ${name}!`; }",
+        )],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("Hello, World!"));
+}
+
+#[test]
+fn test_esm_multiple_imports() {
+    let (out, err) = run_file_with_deps(
+        "esm_multi_main.js",
+        r#"
+            import { add, multiply } from "./ops.js";
+            import { PI } from "./constants.js";
+            console.log(add(2, 3));
+            console.log(multiply(2, 3));
+            console.log(PI);
+        "#,
+        &[
+            ("ops.js", "export function add(a, b) { return a + b; } export function multiply(a, b) { return a * b; }"),
+            ("constants.js", "export const PI = 3.14159;"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("5"));
+    assert!(out.contains("6"));
+    assert!(out.contains("3.14159"));
 }

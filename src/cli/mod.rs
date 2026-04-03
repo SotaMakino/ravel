@@ -7,6 +7,7 @@ use rustyline::DefaultEditor;
 use crate::api::timer::{TimerMessage, TimerState, get_timer_state, set_timer_state};
 use crate::api::setup_all_apis;
 use crate::api::console::value_to_string;
+use crate::core::{run_module, setup_module_loader};
 
 pub fn run(filename: &str) {
     let source = fs::read_to_string(filename).expect("Failed to read file");
@@ -31,6 +32,12 @@ pub fn run_source(source: &str, filename: &str) {
         let root = abs_path.parent().unwrap().to_path_buf();
         let dir = root.to_string_lossy().to_string();
         let file = abs_path.to_string_lossy().to_string();
+        let file_name = abs_path.file_name().unwrap().to_string_lossy().to_string();
+
+        let _prev_dir = std::env::current_dir().unwrap_or_default();
+        std::env::set_current_dir(&root).expect("Failed to change directory");
+
+        setup_module_loader(&runtime, &root).await;
 
         rquickjs::async_with!(ctx => |ctx| {
             if let Err(e) = setup_all_apis(&ctx, &root) {
@@ -39,14 +46,8 @@ pub fn run_source(source: &str, filename: &str) {
             let _: Result<(), _> = ctx.eval(format!("var __filename = {:?};", file));
             let _: Result<(), _> = ctx.eval(format!("var __dirname = {:?};", dir));
 
-            match ctx.eval::<rquickjs::Value, _>(source) {
-                Ok(val) => {
-                    if let Some(s) = val.as_string() {
-                        if let Ok(string) = s.to_string() {
-                            println!("{}", string);
-                        }
-                    }
-                }
+            match run_module(&ctx, source, &file_name).await {
+                Ok(_) => {}
                 Err(e) => eprintln!("QuickJS error: {}", e),
             }
         })
