@@ -1,0 +1,20 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT (sorted) ===
+1. Fired after ~<N>ms
+2. Fired after ~<N>ms
+=== Nested Timers ===
+=== clearTimeout ===
+=== setInterval ===
+=== setTimeout ===
+All timers scheduled, waiting...
+Cancelled timer was cleared
+Inner timer fired
+Interval cleared after 3 ticks
+Interval tick #1
+Interval tick #2
+Interval tick #3
+Outer timer fired
+=== STDERR ===

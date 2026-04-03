@@ -1,0 +1,35 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+=== Variables ===
+x = 10
+y = 20
+x + y = 30
+=== Functions ===
+add(3, 4) = 7
+multiply(3, 4) = 12
+=== Control Flow ===
+x is greater than 5
+=== Loops ===
+i = 0
+i = 1
+i = 2
+=== Arrays ===
+arr = [Array]
+arr[0] = 1
+arr.length = 5
+=== Objects ===
+person = [Object]
+person.name = Alice
+=== Math ===
+Math.PI = 3.141592653589793
+Math.sqrt(144) = 12
+Math.max(1, 5, 3) = 5
+=== JSON ===
+stringified: {"x":1,"y":2}
+parsed: [Object]
+=== Done ===
+
+=== STDERR ===

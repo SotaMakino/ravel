@@ -1,0 +1,16 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+Testing fs sandbox security...
+fs.js exists: true
+Attempting to read /etc/passwd...
+Blocked /etc/passwd: permission denied
+Attempting to read ../Cargo.toml...
+Blocked ../Cargo.toml: permission denied
+/etc/shadow exists: false
+../.env exists: false
+Sandbox security tests passed!
+
+=== STDERR ===
