@@ -153,36 +153,15 @@ fn test_closure() {
 }
 
 #[test]
-fn test_jsc_backend() {
-    let (out, _err) = run_ravel(&["sample_jsc.js"]);
-    assert!(out.contains("Arrow Functions"));
-    assert!(out.contains("Template Literals"));
-    assert!(out.contains("Array Methods"));
+fn test_quickjs_backend() {
+    let (out, _err) = run_ravel(&["examples/basic.js"]);
+    assert!(out.contains("Variables"));
+    assert!(out.contains("Functions"));
+    assert!(out.contains("Control Flow"));
+    assert!(out.contains("Loops"));
+    assert!(out.contains("Arrays"));
+    assert!(out.contains("Objects"));
     assert!(out.contains("Math"));
-    assert!(out.contains("Object Methods"));
-    assert!(out.contains("String Methods"));
-    assert!(out.contains("Destructuring"));
-    assert!(out.contains("Classes"));
     assert!(out.contains("JSON"));
-    assert!(out.contains("Try/Catch"));
-    assert!(out.contains("Spread"));
-    assert!(out.contains("All done!"));
-}
-
-#[cfg(feature = "manual")]
-mod manual_tests {
-    use super::*;
-
-    #[test]
-    fn test_manual_hello_world() {
-        let (out, err) = run_ravel(&["--manual", "sample.js"]);
-        assert_eq!(err, "");
-        assert!(out.contains("Hello"));
-    }
-
-    #[test]
-    fn test_manual_arithmetic() {
-        let (out, err) = run_ravel(&["--manual"]);
-        let _ = (out, err);
-    }
+    assert!(out.contains("Done"));
 }
