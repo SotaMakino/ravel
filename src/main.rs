@@ -142,11 +142,7 @@ fn repl_qjs() {
             rquickjs::async_with!(ctx => |ctx| {
                 match ctx.eval::<rquickjs::Value, _>(line.as_str()) {
                     Ok(val) => {
-                        if let Some(s) = val.as_string() {
-                            if let Ok(string) = s.to_string() {
-                                println!("{}", string);
-                            }
-                        }
+                        println!("{}", ravel::qjs::value_to_string(&val));
                     }
                     Err(e) => eprintln!("QuickJS error: {}", e),
                 }

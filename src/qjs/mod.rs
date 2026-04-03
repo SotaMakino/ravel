@@ -9,7 +9,7 @@ pub use timers::{TimerMessage, TimerState, get_timer_state, set_timer_state};
 pub use timers::setup_timers;
 pub use fs::setup_fs;
 
-fn value_to_string(v: &Value<'_>) -> String {
+pub fn value_to_string(v: &Value<'_>) -> String {
     if let Some(s) = v.as_string() {
         s.to_string().unwrap_or_else(|_| "[object]".to_string())
     } else if let Some(n) = v.as_int() {
@@ -143,6 +143,138 @@ mod tests {
             setup_full_environment(&ctx, &root).unwrap();
             assert!(ctx.globals().get::<_, Object>("console").is_ok());
             assert!(ctx.globals().get::<_, Object>("fs").is_ok());
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_negative_int() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("-42").unwrap();
+            assert_eq!(value_to_string(&v), "-42");
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_zero() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("0").unwrap();
+            assert_eq!(value_to_string(&v), "0");
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_false() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("false").unwrap();
+            assert_eq!(value_to_string(&v), "false");
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_empty_string() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("\"\"").unwrap();
+            assert_eq!(value_to_string(&v), "");
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_array() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("[1, 2, 3]").unwrap();
+            assert!(value_to_string(&v).contains("Array"));
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_empty_array() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("[]").unwrap();
+            assert!(value_to_string(&v).contains("Array"));
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_function() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("(() => {})").unwrap();
+            assert!(value_to_string(&v).contains("Function"));
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_nan() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("NaN").unwrap();
+            let result = value_to_string(&v);
+            assert!(result.contains("NaN") || result == "NaN");
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_infinity() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("Infinity").unwrap();
+            let result = value_to_string(&v);
+            assert!(result == "inf" || result.contains("inf"));
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_object_with_properties() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("({ foo: 'bar' })").unwrap();
+            assert!(value_to_string(&v).contains("Object"));
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_nested_object() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("({ a: { b: 1 } })").unwrap();
+            assert!(value_to_string(&v).contains("Object"));
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_large_float() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("3.14159265358979").unwrap();
+            assert_eq!(value_to_string(&v), "3.14159265358979");
+        });
+    }
+
+    #[test]
+    fn test_value_to_string_negative_float() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            let v: Value = ctx.eval("-3.14").unwrap();
+            assert_eq!(value_to_string(&v), "-3.14");
         });
     }
 }
