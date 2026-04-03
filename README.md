@@ -70,12 +70,18 @@ Run `ravel` with no arguments to start the interactive REPL. Features:
 
 ```
 src/
-  qjs/              — QuickJS enhancements
-    mod.rs          — Module organization & environment setup
-    timers.rs       — Tokio-based setTimeout/setInterval for QuickJS
-    fs.rs           — Sandboxed filesystem (readFile, writeFile, exists)
-  main.rs           — CLI entry point (file execution, REPL, --help)
-  lib.rs            — Library root
+  core/               — QuickJS low-level wrapper and execution foundation
+    mod.rs            — Runtime definition, context management
+    engine.rs         — Bytecode execution, memory limit configuration
+    event_loop.rs     — Tokio and JS Promise integration
+  api/                — Standard API callable from JS
+    mod.rs            — API registration traits and common macros
+    fs/               — fs.readFile, writeFile
+    timer/            — setTimeout, setInterval
+    console/          — console.log
+  cli/                — Command-line interface
+  lib.rs              — Crate entry point
+  main.rs             — Binary entry point
 examples/
   basic.js          — Basic JavaScript features demo
   timers.js         — Timer features demo

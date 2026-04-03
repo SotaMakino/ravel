@@ -1,13 +1,4 @@
-use std::path::Path;
-
-use rquickjs::{Ctx, Object, Result, Value, function::Rest};
-
-pub mod timers;
-pub mod fs;
-
-pub use timers::{TimerMessage, TimerState, get_timer_state, set_timer_state};
-pub use timers::setup_timers;
-pub use fs::setup_fs;
+use rquickjs::{function::Rest, Ctx, Result, Value};
 
 pub fn value_to_string(v: &Value<'_>) -> String {
     if let Some(s) = v.as_string() {
@@ -28,7 +19,7 @@ pub fn value_to_string(v: &Value<'_>) -> String {
 }
 
 pub fn setup_console<'js>(ctx: &Ctx<'js>) -> Result<()> {
-    let console = Object::new(ctx.clone())?;
+    let console = rquickjs::Object::new(ctx.clone())?;
     console.set(
         "log",
         rquickjs::function::Func::new(|args: Rest<Value<'_>>| -> rquickjs::Result<()> {
@@ -38,13 +29,6 @@ pub fn setup_console<'js>(ctx: &Ctx<'js>) -> Result<()> {
         }),
     )?;
     ctx.globals().set("console", console)?;
-    Ok(())
-}
-
-pub fn setup_full_environment<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
-    setup_console(ctx)?;
-    setup_timers(ctx)?;
-    setup_fs(ctx, root)?;
     Ok(())
 }
 
@@ -129,20 +113,8 @@ mod tests {
         let ctx = Context::full(&rt).unwrap();
         ctx.with(|ctx| {
             setup_console(&ctx).unwrap();
-            let console: Object = ctx.globals().get("console").unwrap();
+            let console: rquickjs::Object = ctx.globals().get("console").unwrap();
             assert!(console.get::<_, rquickjs::Function>("log").is_ok());
-        });
-    }
-
-    #[test]
-    fn test_setup_full_environment() {
-        let rt = rquickjs::Runtime::new().unwrap();
-        let ctx = Context::full(&rt).unwrap();
-        let root = std::env::current_dir().unwrap();
-        ctx.with(|ctx| {
-            setup_full_environment(&ctx, &root).unwrap();
-            assert!(ctx.globals().get::<_, Object>("console").is_ok());
-            assert!(ctx.globals().get::<_, Object>("fs").is_ok());
         });
     }
 
