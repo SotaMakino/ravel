@@ -21,6 +21,13 @@ fn test_example_basic() {
 fn test_example_fs() {
     let (out, err) = run_ravel(&["examples/fs.js"]);
     let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
+    let mut settings = insta::Settings::clone_current();
+    settings.add_filter(
+        r"/[^\s]*ravel/examples/fs\.js",
+        "<PROJECT_ROOT>/examples/fs.js",
+    );
+    settings.add_filter(r"/[^\s]*ravel/examples", "<PROJECT_ROOT>/examples");
+    let _guard = settings.bind_to_scope();
     insta::assert_snapshot!("fs", output);
 }
 

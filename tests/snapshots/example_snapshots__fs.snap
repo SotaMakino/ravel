@@ -11,8 +11,8 @@ readFile length: 1025
 First 50 bytes as string: // Test fs sandbox - path traversal should be deni
 Wrote to output.txt
 Read back: Hello from Ravel!
-__filename: /Users/sota/ravel/examples/fs.js
-__dirname: /Users/sota/ravel/examples
+__filename: <PROJECT_ROOT>/examples/fs.js
+__dirname: <PROJECT_ROOT>/examples
 All tests passed!
 
 === STDERR ===
