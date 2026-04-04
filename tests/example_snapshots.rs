@@ -53,3 +53,17 @@ fn test_example_esm() {
     let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
     insta::assert_snapshot!("esm", output);
 }
+
+#[test]
+fn test_example_typescript() {
+    let (out, err) = run_ravel(&["examples/typescript.ts"]);
+    let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
+    insta::assert_snapshot!("typescript", output);
+}
+
+#[test]
+fn test_example_ts_esm() {
+    let (out, err) = run_ravel(&["examples/ts-esm.ts"]);
+    let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
+    insta::assert_snapshot!("ts_esm", output);
+}

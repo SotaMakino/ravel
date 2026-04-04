@@ -1,0 +1,12 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+Hello, Alice! You are 30 years old.
+Favorite color: Green
+Counter: 3
+[Object]
+[Object]
+
+=== STDERR ===
