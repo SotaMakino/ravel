@@ -13,6 +13,12 @@ pub fn value_to_string(v: &Value<'_>) -> String {
         "null".to_string()
     } else if v.is_undefined() {
         "undefined".to_string()
+    } else if let Some(obj) = v.as_object() {
+        if let Ok(html) = obj.get::<_, String>("__html") {
+            html
+        } else {
+            format!("[{:?}]", v.type_of())
+        }
     } else {
         format!("[{:?}]", v.type_of())
     }

@@ -2,9 +2,39 @@ use rquickjs::{Ctx, Result};
 
 pub fn setup_jsx_runtime<'js>(ctx: &Ctx<'js>) -> Result<()> {
     let html = r#"
+function _escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+}
+function _escapeAttr(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+}
+function _isHtml(obj) {
+    return obj && typeof obj === 'object' && obj.__html !== undefined;
+}
+function _toHtml(child) {
+    if (_isHtml(child)) {
+        return child.__html;
+    }
+    return _escapeHtml(child);
+}
+function _makeHtml(str) {
+    var wrapper = new String(str);
+    wrapper.__html = str;
+    return wrapper;
+}
 function note(tag, props, ...children) {
     if (tag === note) {
-        return children.flat().join('');
+        return _makeHtml(children.flat().map(_toHtml).join(''));
     }
     if (typeof tag === 'function') {
         const p = Object.assign({}, props || {});
@@ -23,16 +53,16 @@ function note(tag, props, ...children) {
             if (val === true) {
                 attrs += ' ' + key;
             } else if (val !== false && val != null) {
-                attrs += ' ' + key + '="' + String(val).replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '"';
+                attrs += ' ' + key + '="' + _escapeAttr(val) + '"';
             }
         }
     }
     const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
-    const kids = (children || []).flat().join('');
+    const kids = (children || []).flat().map(_toHtml).join('');
     if (voidTags.has(tag)) {
-        return '<' + tag + attrs + '>';
+        return _makeHtml('<' + tag + attrs + '>');
     }
-    return '<' + tag + attrs + '>' + kids + '</' + tag + '>';
+    return _makeHtml('<' + tag + attrs + '>' + kids + '</' + tag + '>');
 }
 "#;
     ctx.eval::<(), _>(html)?;
@@ -61,7 +91,7 @@ mod tests {
         let ctx = Context::full(&rt).unwrap();
         ctx.with(|ctx| {
             setup_jsx_runtime(&ctx).unwrap();
-            let result: String = ctx.eval(r#"note("div", null, "Hello")"#).unwrap();
+            let result: String = ctx.eval(r#"String(note("div", null, "Hello"))"#).unwrap();
             assert_eq!(result, "<div>Hello</div>");
         });
     }
@@ -73,7 +103,7 @@ mod tests {
         ctx.with(|ctx| {
             setup_jsx_runtime(&ctx).unwrap();
             let result: String = ctx
-                .eval(r#"note("a", { href: "https://example.com" }, "Link")"#)
+                .eval(r#"String(note("a", { href: "https://example.com" }, "Link"))"#)
                 .unwrap();
             assert_eq!(result, r#"<a href="https://example.com">Link</a>"#);
         });
@@ -85,7 +115,7 @@ mod tests {
         let ctx = Context::full(&rt).unwrap();
         ctx.with(|ctx| {
             setup_jsx_runtime(&ctx).unwrap();
-            let result: String = ctx.eval(r#"note("br", null)"#).unwrap();
+            let result: String = ctx.eval(r#"String(note("br", null))"#).unwrap();
             assert_eq!(result, "<br>");
         });
     }
@@ -97,7 +127,7 @@ mod tests {
         ctx.with(|ctx| {
             setup_jsx_runtime(&ctx).unwrap();
             let result: String = ctx
-                .eval(r#"note("div", null, note("span", null, "inner"))"#)
+                .eval(r#"String(note("div", null, note("span", null, "inner")))"#)
                 .unwrap();
             assert_eq!(result, "<div><span>inner</span></div>");
         });
@@ -110,7 +140,7 @@ mod tests {
         ctx.with(|ctx| {
             setup_jsx_runtime(&ctx).unwrap();
             let result: String = ctx
-                .eval(r#"note(note, null, note("div", null, "A"), note("div", null, "B"))"#)
+                .eval(r#"String(note(note, null, note("div", null, "A"), note("div", null, "B")))"#)
                 .unwrap();
             assert_eq!(result, "<div>A</div><div>B</div>");
         });
@@ -130,7 +160,9 @@ mod tests {
                 "#,
             )
             .unwrap();
-            let result: String = ctx.eval(r#"note(Greeting, { name: "World" })"#).unwrap();
+            let result: String = ctx
+                .eval(r#"String(note(Greeting, { name: "World" }))"#)
+                .unwrap();
             assert_eq!(result, "<span>Hello, World</span>");
         });
     }
@@ -141,7 +173,9 @@ mod tests {
         let ctx = Context::full(&rt).unwrap();
         ctx.with(|ctx| {
             setup_jsx_runtime(&ctx).unwrap();
-            let result: String = ctx.eval(r#"note("input", { disabled: true })"#).unwrap();
+            let result: String = ctx
+                .eval(r#"String(note("input", { disabled: true }))"#)
+                .unwrap();
             assert_eq!(result, "<input disabled>");
         });
     }
@@ -152,7 +186,9 @@ mod tests {
         let ctx = Context::full(&rt).unwrap();
         ctx.with(|ctx| {
             setup_jsx_runtime(&ctx).unwrap();
-            let result: String = ctx.eval(r#"note("input", { disabled: false })"#).unwrap();
+            let result: String = ctx
+                .eval(r#"String(note("input", { disabled: false }))"#)
+                .unwrap();
             assert_eq!(result, "<input>");
         });
     }
@@ -164,9 +200,110 @@ mod tests {
         ctx.with(|ctx| {
             setup_jsx_runtime(&ctx).unwrap();
             let result: String = ctx
-                .eval(r#"note("div", { title: "a & b" }, "test")"#)
+                .eval(r#"String(note("div", { title: "a & b" }, "test"))"#)
                 .unwrap();
             assert_eq!(result, r#"<div title="a &amp; b">test</div>"#);
+        });
+    }
+
+    #[test]
+    fn test_note_xss_escapes_children_script_tag() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            let result: String = ctx
+                .eval(r#"String(note("div", null, "<script>alert(1)</script>"))"#)
+                .unwrap();
+            assert_eq!(
+                result,
+                r#"<div>&lt;script&gt;alert(1)&lt;/script&gt;</div>"#
+            );
+        });
+    }
+
+    #[test]
+    fn test_note_xss_escapes_children_angle_brackets() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            let result: String = ctx
+                .eval(r#"String(note("div", null, "<img onerror=alert(1) src=x>"))"#)
+                .unwrap();
+            assert_eq!(result, r#"<div>&lt;img onerror=alert(1) src=x&gt;</div>"#);
+        });
+    }
+
+    #[test]
+    fn test_note_xss_escapes_attr_with_script_injection() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            let result: String = ctx
+                .eval(r#"String(note("div", { title: '"><script>alert(1)</script>' }, "test"))"#)
+                .unwrap();
+            assert_eq!(
+                result,
+                r#"<div title="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;">test</div>"#
+            );
+        });
+    }
+
+    #[test]
+    fn test_note_xss_escapes_attr_single_quote() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            let result: String = ctx
+                .eval(r#"String(note("div", { onclick: "alert('xss')" }, "test"))"#)
+                .unwrap();
+            assert_eq!(
+                result,
+                r#"<div onclick="alert(&#x27;xss&#x27;)">test</div>"#
+            );
+        });
+    }
+
+    #[test]
+    fn test_note_xss_escapes_children_in_function_component() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            ctx.eval::<(), _>(
+                r#"
+                function Safe(props) {
+                    return note("div", null, props.children);
+                }
+                "#,
+            )
+            .unwrap();
+            let result: String = ctx
+                .eval(r#"String(note(Safe, null, '<script>alert(1)</script>'))"#)
+                .unwrap();
+            assert_eq!(
+                result,
+                r#"<div>&lt;script&gt;alert(1)&lt;/script&gt;</div>"#
+            );
+        });
+    }
+
+    #[test]
+    fn test_note_xss_escapes_nested_children() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            let result: String = ctx
+                .eval(r#"String(note("div", null, "safe", note("span", null, "<b>bold</b>"), "end"))"#)
+                .unwrap();
+            assert_eq!(
+                result,
+                r#"<div>safe<span>&lt;b&gt;bold&lt;/b&gt;</span>end</div>"#
+            );
         });
     }
 }

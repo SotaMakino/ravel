@@ -448,6 +448,60 @@ fn test_jsx_full_page() {
 }
 
 #[test]
+fn test_jsx_xss_escapes_children() {
+    let source = r#"
+        const userInput = "<script>alert('xss')</script>";
+        const el = <div>{userInput}</div>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_xss_children.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("&lt;script&gt;"));
+    assert!(out.contains("&lt;/script&gt;"));
+    assert!(!out.contains("<script>"));
+}
+
+#[test]
+fn test_jsx_xss_escapes_attribute_values() {
+    let source = r#"
+        const malicious = '"><script>alert(1)</script>';
+        const el = <a href={malicious}>click</a>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_xss_attr.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("&quot;&gt;&lt;script&gt;"));
+    assert!(!out.contains("\"><script>"));
+}
+
+#[test]
+fn test_jsx_xss_escapes_img_onerror() {
+    let source = r#"
+        const payload = "<img onerror=alert(1) src=x>";
+        const el = <div>{payload}</div>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_xss_img.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("&lt;img"));
+    assert!(out.contains("&gt;"));
+    assert!(!out.contains("<img"));
+}
+
+#[test]
+fn test_jsx_xss_escapes_single_quotes_in_attr() {
+    let source = r#"
+        const val = "alert('xss')";
+        const el = <div onclick={val}>test</div>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_xss_singlequote.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("&#x27;"));
+    assert!(!out.contains("'xss'"));
+}
+
+#[test]
 fn test_build_flag_requires_file() {
     let (out, err) = run_ravel(&["--build"]);
     assert!(!out.contains("Hello"));
