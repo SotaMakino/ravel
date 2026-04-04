@@ -46,3 +46,10 @@ fn test_example_timers() {
     let _guard = settings.bind_to_scope();
     insta::assert_snapshot!("timers", output);
 }
+
+#[test]
+fn test_example_esm() {
+    let (out, err) = run_ravel(&["examples/esm.js"]);
+    let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
+    insta::assert_snapshot!("esm", output);
+}

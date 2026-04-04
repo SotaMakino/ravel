@@ -1,0 +1,12 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+=== ESM Imports ===
+add(5, 3) = 8
+PI = 3.14159
+Hello, World!
+=== ESM Done ===
+
+=== STDERR ===
