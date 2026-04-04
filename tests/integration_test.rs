@@ -339,3 +339,110 @@ fn test_ts_type_imports() {
     assert_eq!(err, "");
     assert!(out.contains("42"));
 }
+
+#[test]
+fn test_jsx_simple_element() {
+    let source = r#"
+        const el = <div>Hello</div>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_simple.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("<div>Hello</div>"));
+}
+
+#[test]
+fn test_jsx_with_attributes() {
+    let source = r#"
+        const el = <a href="https://example.com">Link</a>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_attrs.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains(r#"<a href="https://example.com">Link</a>"#));
+}
+
+#[test]
+fn test_jsx_nested_elements() {
+    let source = r#"
+        const el = <div><span>inner</span></div>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_nested.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("<div><span>inner</span></div>"));
+}
+
+#[test]
+fn test_jsx_self_closing() {
+    let source = r#"
+        const el = <br />;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_void.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("<br>"));
+}
+
+#[test]
+fn test_jsx_fragment() {
+    let source = r#"
+        const el = <><div>A</div><div>B</div></>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_frag.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("<div>A</div><div>B</div>"));
+}
+
+#[test]
+fn test_jsx_function_component() {
+    let source = r#"
+        function Greeting(props) {
+            return <span>Hello, {props.name}</span>;
+        }
+        const el = <Greeting name="World" />;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_component.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("<span>Hello, World</span>"));
+}
+
+#[test]
+fn test_jsx_with_expression() {
+    let source = r#"
+        const name = "world";
+        const el = <div>Hello {name}</div>;
+        console.log(el);
+    "#;
+    let (out, err) = run_file("jsx_expr.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("<div>Hello world</div>"));
+}
+
+#[test]
+fn test_jsx_full_page() {
+    let source = r#"
+        function Page() {
+            return (
+                <html>
+                    <head>
+                        <title>Test</title>
+                    </head>
+                    <body>
+                        <h1>Welcome</h1>
+                        <p>This is a test page.</p>
+                    </body>
+                </html>
+            );
+        }
+        console.log(<Page />);
+    "#;
+    let (out, err) = run_file("jsx_page.tsx", source);
+    assert_eq!(err, "");
+    assert!(out.contains("<html>"));
+    assert!(out.contains("<title>Test</title>"));
+    assert!(out.contains("<h1>Welcome</h1>"));
+    assert!(out.contains("<p>This is a test page.</p>"));
+}
