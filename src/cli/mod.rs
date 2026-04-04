@@ -11,11 +11,13 @@ use crate::fs::setup_fs;
 use crate::timer::setup_timers;
 use crate::core::{run_module, setup_module_loader};
 use crate::transpiler::{is_typescript_file, transpile_ts};
+use crate::jsx::setup_jsx_runtime;
 
 fn setup_all_apis<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
     setup_console(ctx)?;
     setup_timers(ctx)?;
     setup_fs(ctx, root)?;
+    setup_jsx_runtime(ctx)?;
     Ok(())
 }
 
