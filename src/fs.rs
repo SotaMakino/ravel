@@ -26,14 +26,23 @@ fn resolve_path_for_write(root: &Path, input: &str) -> std::io::Result<PathBuf> 
     let canon_resolved = if joined.exists() {
         joined.canonicalize()?
     } else {
-        let parent = joined.parent().unwrap_or(Path::new(""));
-        let canon_parent = parent.canonicalize()?;
-
-        if !canon_parent.starts_with(&canon_root) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "permission denied",
-            ));
+        let mut candidate = joined.clone();
+        loop {
+            if candidate.exists() {
+                let canon_candidate = candidate.canonicalize()?;
+                if !canon_candidate.starts_with(&canon_root) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "permission denied",
+                    ));
+                }
+                break;
+            }
+            let parent = candidate.parent();
+            if parent.is_none() || parent == Some(Path::new("")) {
+                break;
+            }
+            candidate = parent.unwrap().to_path_buf();
         }
 
         joined
@@ -53,6 +62,7 @@ pub fn setup_fs<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
     let root1 = root.to_path_buf();
     let root2 = root.to_path_buf();
     let root3 = root.to_path_buf();
+    let root4 = root.to_path_buf();
     let fs_obj = Object::new(ctx.clone())?;
 
     fs_obj.set(
@@ -82,6 +92,15 @@ pub fn setup_fs<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
                 let resolved = resolve_path_for_write(&root2, &path).map_err(|e| {
                     Error::new_from_js_message("file", "write", format!("{}: '{}'", e, path))
                 })?;
+                if let Some(parent) = resolved.parent() {
+                    fs::create_dir_all(parent).map_err(|e| {
+                        Error::new_from_js_message(
+                            "file",
+                            "write",
+                            format!("failed to create directories: {}: '{}'", e, path),
+                        )
+                    })?;
+                }
                 fs::write(&resolved, data.as_bytes().unwrap()).map_err(|e| {
                     Error::new_from_js_message(
                         "file",
@@ -100,6 +119,46 @@ pub fn setup_fs<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
                 Ok(resolved) => resolved.exists(),
                 Err(_) => false,
             }
+        }),
+    )?;
+
+    fs_obj.set(
+        "mkdirSync",
+        rquickjs::function::Func::new(move |path: String| -> Result<()> {
+            let canon_root = root4.canonicalize().map_err(|e| {
+                Error::new_from_js_message("file", "mkdir", format!("{}: '{}'", e, path))
+            })?;
+            let joined = root4.join(&path);
+            let resolved = if joined.exists() {
+                joined.canonicalize().map_err(|e| {
+                    Error::new_from_js_message("file", "mkdir", format!("{}: '{}'", e, path))
+                })?
+            } else {
+                let parent = joined.parent().unwrap_or(Path::new(""));
+                if parent.exists() {
+                    let canon_parent = parent.canonicalize().map_err(|e| {
+                        Error::new_from_js_message("file", "mkdir", format!("{}: '{}'", e, path))
+                    })?;
+                    if !canon_parent.starts_with(&canon_root) {
+                        return Err(Error::new_from_js_message(
+                            "file",
+                            "mkdir",
+                            format!("permission denied: '{}'", path),
+                        ));
+                    }
+                }
+                joined
+            };
+            if !resolved.starts_with(&canon_root) {
+                return Err(Error::new_from_js_message(
+                    "file",
+                    "mkdir",
+                    format!("permission denied: '{}'", path),
+                ));
+            }
+            fs::create_dir_all(&resolved).map_err(|e| {
+                Error::new_from_js_message("file", "mkdir", format!("{}: '{}'", e, path))
+            })
         }),
     )?;
 
@@ -216,6 +275,7 @@ mod tests {
             assert!(fs_obj.get::<_, rquickjs::Function>("readFile").is_ok());
             assert!(fs_obj.get::<_, rquickjs::Function>("writeFile").is_ok());
             assert!(fs_obj.get::<_, rquickjs::Function>("exists").is_ok());
+            assert!(fs_obj.get::<_, rquickjs::Function>("mkdirSync").is_ok());
         });
     }
 }

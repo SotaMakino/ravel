@@ -8,7 +8,9 @@ A toy JavaScript/TypeScript runtime written in Rust.
 ravel file.js      # run JavaScript
 ravel file.ts      # run TypeScript (auto-transpiled via Oxc)
 ravel              # start REPL
+ravel --build file.js  # SSG build mode (one-off, no timers)
 ravel --help
+ravel --version
 ```
 
 ## Building
@@ -29,10 +31,11 @@ cargo test
 - **TypeScript** — `.ts`/`.tsx` files are stripped of types by Oxc and fed directly into QuickJS
 - **JSX rendering** — `.tsx` files transform JSX into `note()` calls that produce HTML strings
 - **Async runtime** — `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` on a Tokio event loop
-- **Sandboxed fs** — `fs.readFile`, `fs.writeFile`, `fs.exists` scoped to the script's directory
+- **Sandboxed fs** — `fs.readFile`, `fs.writeFile` (auto-creates parent dirs), `fs.mkdirSync`, `fs.exists` scoped to the script's directory
 - **ESM imports** — relative and bare imports with `.js`, `.mjs`, `.ts`, `.tsx` resolution
-- **Globals** — `__filename`, `__dirname`
+- **Globals** — `__filename`, `__dirname`, `process.env`, `ravel.version`, `ravel.build`
 - **REPL** — line history with persistence, timer support
+- **SSG build mode** — `--build` flag runs scripts as one-off compilation tasks with `ravel.build === true` and `process.env.RAVEL_BUILD === "1"`
 
 ## Project Structure
 
@@ -73,3 +76,56 @@ JSX is transformed using the classic runtime with `note` as the pragma function.
 - Fragments (`<>...</>`)
 - Function components with props
 - Attribute value escaping
+
+## SSG Build Mode
+
+Use `--build` to run a script as a one-off static site generation task. Unlike normal execution, build mode:
+
+- Sets `ravel.build` to `true` (vs `false` in normal/REPL mode)
+- Sets `process.env.RAVEL_BUILD` to `"1"`
+- Skips the timer event loop (no persistent runtime)
+
+```js
+// build.js
+if (ravel.build) {
+  console.log("Running in build mode");
+  fs.writeFile("dist/index.html", new TextEncoder().encode("<h1>Built</h1>"));
+}
+```
+
+```bash
+ravel --build build.js
+```
+
+## Build Metadata
+
+The following globals are available in all modes:
+
+| Global | Description |
+|--------|-------------|
+| `ravel.version` | Current ravel version (e.g. `"0.3.0"`) |
+| `ravel.build` | `true` when run with `--build`, `false` otherwise |
+| `process.env` | Object containing all environment variables |
+| `process.env.RAVEL_BUILD` | `"1"` in build mode, `undefined` otherwise |
+
+```js
+console.log(ravel.version);  // "0.3.0"
+console.log(process.env.HOME);  // "/Users/..."
+```
+
+## Enhanced Filesystem
+
+`fs.writeFile` automatically creates parent directories, making it suitable for writing to nested static routes without manual directory setup:
+
+```js
+// Writes to dist/posts/hello/index.html, creating all intermediate directories
+const html = new TextEncoder().encode("<h1>Hello</h1>");
+fs.writeFile("dist/posts/hello/index.html", html);
+```
+
+`fs.mkdirSync(path)` creates directories recursively within the sandbox:
+
+```js
+fs.mkdirSync("dist/assets/css");  // creates dist/assets/css
+fs.mkdirSync("dist");             // no-op if already exists
+```

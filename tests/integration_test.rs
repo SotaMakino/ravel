@@ -446,3 +446,167 @@ fn test_jsx_full_page() {
     assert!(out.contains("<h1>Welcome</h1>"));
     assert!(out.contains("<p>This is a test page.</p>"));
 }
+
+#[test]
+fn test_build_flag_requires_file() {
+    let (out, err) = run_ravel(&["--build"]);
+    assert!(!out.contains("Hello"));
+    assert!(err.contains("--build requires a script file"));
+}
+
+#[test]
+fn test_build_mode_sets_ravel_build_global() {
+    let source = r#"
+        console.log(ravel.build);
+    "#;
+    let tmp = std::env::temp_dir().join("build_test.js");
+    std::fs::write(&tmp, source).expect("Failed to write temp file");
+    let (out, err) = run_ravel(&["--build", tmp.to_str().unwrap()]);
+    let _ = std::fs::remove_file(tmp);
+    assert_eq!(err, "");
+    assert!(out.contains("true"));
+}
+
+#[test]
+fn test_normal_mode_ravel_build_is_false() {
+    let (out, err) = run_file("normal_build.js", "console.log(ravel.build);");
+    assert_eq!(err, "");
+    assert!(out.contains("false"));
+}
+
+#[test]
+fn test_ravel_version() {
+    let (out, err) = run_file("version.js", "console.log(ravel.version);");
+    assert_eq!(err, "");
+    assert!(out.contains("0.3.0"));
+}
+
+#[test]
+fn test_process_env() {
+    let (out, err) = run_file("env.js", "console.log(typeof process.env);");
+    assert_eq!(err, "");
+    assert!(out.contains("object"));
+}
+
+#[test]
+fn test_process_env_has_path() {
+    let (out, err) = run_file(
+        "env_path.js",
+        "console.log(typeof process.env.PATH !== 'undefined');",
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("true"));
+}
+
+#[test]
+fn test_build_mode_env_has_ravel_build() {
+    let source = r#"
+        console.log(process.env.RAVEL_BUILD);
+    "#;
+    let tmp = std::env::temp_dir().join("build_env_test.js");
+    std::fs::write(&tmp, source).expect("Failed to write temp file");
+    let (out, err) = run_ravel(&["--build", tmp.to_str().unwrap()]);
+    let _ = std::fs::remove_file(tmp);
+    assert_eq!(err, "");
+    assert!(out.contains("1"));
+}
+
+#[test]
+fn test_normal_mode_env_no_ravel_build() {
+    let source = r#"
+        console.log(process.env.RAVEL_BUILD);
+    "#;
+    let (out, err) = run_file("no_build_env.js", source);
+    assert_eq!(err, "");
+    assert!(out.contains("undefined"));
+}
+
+#[test]
+fn test_fs_mkdir_sync() {
+    let source = r#"
+        fs.mkdirSync("test_dir");
+        console.log(fs.exists("test_dir"));
+    "#;
+    let (out, err) = run_file("mkdir.js", source);
+    assert_eq!(err, "");
+    assert!(out.contains("true"));
+}
+
+#[test]
+fn test_fs_mkdir_sync_nested() {
+    let source = r#"
+        fs.mkdirSync("a/b/c");
+        console.log(fs.exists("a/b/c"));
+    "#;
+    let (out, err) = run_file("mkdir_nested.js", source);
+    assert_eq!(err, "");
+    assert!(out.contains("true"));
+}
+
+#[test]
+fn test_fs_write_file_creates_directories() {
+    let source = r#"
+        var data = new Uint8Array([72, 101, 108, 108, 111]);
+        fs.writeFile("nested/deep/file.txt", data);
+        console.log(fs.exists("nested/deep/file.txt"));
+    "#;
+    let (out, err) = run_file("write_nested.js", source);
+    assert_eq!(err, "");
+    assert!(out.contains("true"));
+}
+
+#[test]
+fn test_fs_mkdir_sync_escape_attempt() {
+    let source = r#"
+        try {
+            fs.mkdirSync("../escape_dir");
+            console.log("escaped");
+        } catch (e) {
+            console.log("blocked");
+        }
+    "#;
+    let (out, err) = run_file("mkdir_escape.js", source);
+    assert_eq!(err, "");
+    assert!(out.contains("blocked"));
+}
+
+#[test]
+fn test_version_flag() {
+    let (out, err) = run_ravel(&["--version"]);
+    assert_eq!(err, "");
+    assert!(out.contains("0.3.0"));
+}
+
+#[test]
+fn test_short_version_flag() {
+    let (out, err) = run_ravel(&["-v"]);
+    assert_eq!(err, "");
+    assert!(out.contains("0.3.0"));
+}
+
+#[test]
+fn test_short_help_flag() {
+    let (out, err) = run_ravel(&["-h"]);
+    assert_eq!(err, "");
+    assert!(out.contains("--build"));
+}
+
+#[test]
+fn test_example_site_build() {
+    let _ = std::fs::remove_dir_all("examples/site/dist");
+    let (out, err) = run_ravel(&["--build", "examples/site/build.tsx"]);
+    assert_eq!(err, "");
+    assert!(out.contains("wrote dist/index.html"));
+    assert!(out.contains("wrote dist/about.html"));
+    assert!(out.contains("done"));
+
+    let index = std::fs::read_to_string("examples/site/dist/index.html").unwrap();
+    assert!(index.contains("<title>Home</title>"));
+    assert!(index.contains("<h1>Welcome</h1>"));
+
+    let about = std::fs::read_to_string("examples/site/dist/about.html").unwrap();
+    assert!(about.contains("<title>About</title>"));
+    assert!(about.contains("<h1>About</h1>"));
+
+    let _ = std::fs::remove_dir_all("examples/site/dist");
+}

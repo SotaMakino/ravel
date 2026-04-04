@@ -1,0 +1,10 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+wrote dist/index.html
+wrote dist/about.html
+done - 2 pages (ravel 0.3.0)
+
+=== STDERR ===
