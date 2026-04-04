@@ -10,6 +10,7 @@ use crate::console::{value_to_string, setup_console};
 use crate::fs::setup_fs;
 use crate::timer::setup_timers;
 use crate::core::{run_module, setup_module_loader};
+use crate::transpiler::{is_typescript_file, transpile_ts};
 
 fn setup_all_apis<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
     setup_console(ctx)?;
@@ -19,7 +20,20 @@ fn setup_all_apis<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
 }
 
 pub fn run(filename: &str) {
-    let source = fs::read_to_string(filename).expect("Failed to read file");
+    let raw_source = fs::read_to_string(filename).expect("Failed to read file");
+
+    let source = if is_typescript_file(filename) {
+        match transpile_ts(&raw_source, filename) {
+            Ok(js) => js,
+            Err(e) => {
+                eprintln!("TypeScript transpile error: {}", e);
+                return;
+            }
+        }
+    } else {
+        raw_source
+    };
+
     run_source(&source, filename);
 }
 
