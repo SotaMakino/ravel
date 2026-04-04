@@ -4,3 +4,4 @@ pub mod fs;
 pub mod timer;
 pub mod cli;
 pub mod transpiler;
+pub mod jsx;
