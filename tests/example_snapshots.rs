@@ -67,3 +67,10 @@ fn test_example_ts_esm() {
     let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
     insta::assert_snapshot!("ts_esm", output);
 }
+
+#[test]
+fn test_example_jsx() {
+    let (out, err) = run_ravel(&["examples/jsx.tsx"]);
+    let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
+    insta::assert_snapshot!("jsx", output);
+}

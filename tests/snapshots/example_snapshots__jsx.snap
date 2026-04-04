@@ -1,0 +1,23 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+=== Simple Elements ===
+<h1>Hello, Ravel!</h1>
+=== With Attributes ===
+<a href="https://example.com" target="_blank">Click here</a>
+=== Nested Elements ===
+<div class="card"><h2>Card Title</h2><p>This is a card with some content.</p></div>
+=== Self-Closing Tags ===
+<br>
+<img src="logo.png" alt="Logo">
+=== Fragments ===
+<li>Item 1</li><li>Item 2</li><li>Item 3</li>
+=== Function Components ===
+<span class="badge">New</span>
+=== Full Page ===
+<html><head><title>My App</title></head><body><header><h1>My App</h1></header><main><p>Welcome to my app!</p></main><footer><p>Footer content</p></footer></body></html>
+=== Done ===
+
+=== STDERR ===
