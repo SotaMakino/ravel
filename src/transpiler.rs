@@ -3,7 +3,7 @@ use oxc_codegen::Codegen;
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
-use oxc_transformer::{TransformOptions, Transformer};
+use oxc_transformer::{JsxOptions, JsxRuntime, TransformOptions, Transformer};
 use std::path::Path;
 
 pub fn transpile_ts(source: &str, filename: &str) -> Result<String, String> {
@@ -27,7 +27,19 @@ pub fn transpile_ts(source: &str, filename: &str) -> Result<String, String> {
         .with_excess_capacity(2.0)
         .build(&program);
 
-    let options = TransformOptions::default();
+    let mut options = TransformOptions::default();
+    if filename.ends_with(".tsx") {
+        options.jsx = JsxOptions {
+            jsx_plugin: true,
+            runtime: JsxRuntime::Classic,
+            pragma: Some("note".to_string()),
+            pragma_frag: Some("note".to_string()),
+            throw_if_namespace: false,
+            pure: false,
+            ..Default::default()
+        };
+    }
+
     let ret = Transformer::new(&allocator, Path::new(filename), &options)
         .build_with_scoping(semantic.semantic.into_scoping(), &mut program);
 
@@ -182,5 +194,59 @@ mod tests {
         let output = transpile_ts(input, "test.ts").unwrap();
         assert!(output.contains("export const x = 42"));
         assert!(output.contains("export default"));
+    }
+
+    #[test]
+    fn test_jsx_simple_element() {
+        let input = r#"const el = <div>Hello</div>;"#;
+        let output = transpile_ts(input, "test.tsx").unwrap();
+        assert!(output.contains(r#"note("div""#));
+        assert!(output.contains("Hello"));
+    }
+
+    #[test]
+    fn test_jsx_with_attributes() {
+        let input = r#"const el = <a href="https://example.com">Link</a>;"#;
+        let output = transpile_ts(input, "test.tsx").unwrap();
+        assert!(output.contains(r#"note("a""#));
+        assert!(output.contains(r#"href"#));
+    }
+
+    #[test]
+    fn test_jsx_nested_elements() {
+        let input = r#"const el = <div><span>inner</span></div>;"#;
+        let output = transpile_ts(input, "test.tsx").unwrap();
+        assert!(output.contains(r#"note("div""#));
+        assert!(output.contains(r#"note("span""#));
+    }
+
+    #[test]
+    fn test_jsx_self_closing() {
+        let input = r#"const el = <br />;"#;
+        let output = transpile_ts(input, "test.tsx").unwrap();
+        assert!(output.contains(r#"note("br""#));
+    }
+
+    #[test]
+    fn test_jsx_with_expression() {
+        let input = r#"const name = "world"; const el = <div>Hello {name}</div>;"#;
+        let output = transpile_ts(input, "test.tsx").unwrap();
+        assert!(output.contains(r#"note("div""#));
+        assert!(output.contains("name"));
+    }
+
+    #[test]
+    fn test_jsx_fragment() {
+        let input = r#"const el = <><div>A</div><div>B</div></>;"#;
+        let output = transpile_ts(input, "test.tsx").unwrap();
+        assert!(output.contains("note"));
+    }
+
+    #[test]
+    fn test_jsx_with_props() {
+        let input = r#"const el = <input type="text" disabled />;"#;
+        let output = transpile_ts(input, "test.tsx").unwrap();
+        assert!(output.contains(r#"note("input""#));
+        assert!(output.contains(r#"type"#));
     }
 }
