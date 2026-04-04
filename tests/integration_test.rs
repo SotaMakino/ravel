@@ -232,3 +232,110 @@ fn test_esm_multiple_imports() {
     assert!(out.contains("6"));
     assert!(out.contains("3.14159"));
 }
+
+#[test]
+fn test_ts_type_stripping() {
+    let source = r#"
+        const x: number = 42;
+        console.log(x);
+    "#;
+    let (out, err) = run_file("types.ts", source);
+    assert_eq!(err, "");
+    assert!(out.contains("42"));
+}
+
+#[test]
+fn test_ts_interface() {
+    let source = r#"
+        interface User {
+            name: string;
+            age: number;
+        }
+        const user: User = { name: "Alice", age: 30 };
+        console.log(user.name);
+    "#;
+    let (out, err) = run_file("interface.ts", source);
+    assert_eq!(err, "");
+    assert!(out.contains("Alice"));
+}
+
+#[test]
+fn test_ts_function_types() {
+    let source = r#"
+        function add(a: number, b: number): number {
+            return a + b;
+        }
+        console.log(add(10, 20));
+    "#;
+    let (out, err) = run_file("fn_types.ts", source);
+    assert_eq!(err, "");
+    assert!(out.contains("30"));
+}
+
+#[test]
+fn test_ts_enum() {
+    let source = r#"
+        enum Color { Red, Green, Blue }
+        console.log(Color[Color.Green]);
+    "#;
+    let (out, err) = run_file("enum.ts", source);
+    assert_eq!(err, "");
+    assert!(out.contains("Green"));
+}
+
+#[test]
+fn test_ts_class_types() {
+    let source = r#"
+        class Counter {
+            count: number;
+            constructor(initial: number) {
+                this.count = initial;
+            }
+            increment(): number {
+                this.count++;
+                return this.count;
+            }
+        }
+        const c: Counter = new Counter(0);
+        c.increment();
+        c.increment();
+        console.log(c.count);
+    "#;
+    let (out, err) = run_file("class_types.ts", source);
+    assert_eq!(err, "");
+    assert!(out.contains("2"));
+}
+
+#[test]
+fn test_ts_esm_imports() {
+    let (out, err) = run_file_with_deps(
+        "ts_main.ts",
+        r#"
+            import { add } from "./math.ts";
+            const result: number = add(5, 3);
+            console.log(result);
+        "#,
+        &[(
+            "math.ts",
+            "export function add(a: number, b: number): number { return a + b; }",
+        )],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("8"));
+}
+
+#[test]
+fn test_ts_type_imports() {
+    let source = r#"
+        import type { Foo } from "./types.ts";
+        const x: Foo = { bar: 42 };
+        console.log(x.bar);
+    "#;
+    let (out, err) = run_file_with_deps(
+        "type_import.ts",
+        source,
+        &[("types.ts", "export interface Foo { bar: number; }")],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("42"));
+}
