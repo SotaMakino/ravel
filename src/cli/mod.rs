@@ -1,13 +1,22 @@
 use std::fs;
+use std::path::Path;
 use std::time::Duration;
 
-use rquickjs::{AsyncContext, AsyncRuntime};
+use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Result};
 use rustyline::DefaultEditor;
 
-use crate::api::timer::{TimerMessage, TimerState, get_timer_state, set_timer_state};
-use crate::api::setup_all_apis;
-use crate::api::console::value_to_string;
+use crate::timer::{TimerMessage, TimerState, get_timer_state, set_timer_state};
+use crate::console::{value_to_string, setup_console};
+use crate::fs::setup_fs;
+use crate::timer::setup_timers;
 use crate::core::{run_module, setup_module_loader};
+
+fn setup_all_apis<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
+    setup_console(ctx)?;
+    setup_timers(ctx)?;
+    setup_fs(ctx, root)?;
+    Ok(())
+}
 
 pub fn run(filename: &str) {
     let source = fs::read_to_string(filename).expect("Failed to read file");
@@ -43,8 +52,8 @@ pub fn run_source(source: &str, filename: &str) {
             if let Err(e) = setup_all_apis(&ctx, &root) {
                 eprintln!("Environment setup error: {}", e);
             }
-            let _: Result<(), _> = ctx.eval(format!("var __filename = {:?};", file));
-            let _: Result<(), _> = ctx.eval(format!("var __dirname = {:?};", dir));
+            let _: Result<()> = ctx.eval(format!("var __filename = {:?};", file));
+            let _: Result<()> = ctx.eval(format!("var __dirname = {:?};", dir));
 
             match run_module(&ctx, source, &file_name).await {
                 Ok(_) => {}
@@ -60,13 +69,13 @@ pub fn run_source(source: &str, filename: &str) {
                     rquickjs::async_with!(ctx_clone => |ctx| {
                         match msg {
                             TimerMessage::FireTimeout(id) => {
-                                let _: Result<(), _> = ctx.eval(format!("__ravel_fire_timer({})", id));
+                                    let _: Result<()> = ctx.eval(format!("__ravel_fire_timer({})", id));
                                 if let Some(state) = get_timer_state() {
                                     state.entries.lock().unwrap().remove(&id);
                                 }
                             }
                             TimerMessage::FireInterval(id) => {
-                                let _: Result<(), _> = ctx.eval(format!("__ravel_fire_interval({})", id));
+                                    let _: Result<()> = ctx.eval(format!("__ravel_fire_interval({})", id));
                             }
                         }
                     })
@@ -142,13 +151,13 @@ pub fn repl() {
                         rquickjs::async_with!(ctx_clone => |ctx| {
                             match msg {
                                 TimerMessage::FireTimeout(id) => {
-                                    let _: Result<(), _> = ctx.eval(format!("__ravel_fire_timer({})", id));
+                                let _: Result<()> = ctx.eval(format!("__ravel_fire_timer({})", id));
                                     if let Some(state) = get_timer_state() {
                                         state.entries.lock().unwrap().remove(&id);
                                     }
                                 }
                                 TimerMessage::FireInterval(id) => {
-                                    let _: Result<(), _> = ctx.eval(format!("__ravel_fire_interval({})", id));
+                                let _: Result<()> = ctx.eval(format!("__ravel_fire_interval({})", id));
                                 }
                             }
                         })

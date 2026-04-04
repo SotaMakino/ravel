@@ -2,7 +2,7 @@ use rquickjs::AsyncContext;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::api::timer::{TimerMessage, get_timer_state};
+use crate::timer::{TimerMessage, get_timer_state};
 
 pub struct EventLoop {
     timer_rx: mpsc::UnboundedReceiver<TimerMessage>,

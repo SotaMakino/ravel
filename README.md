@@ -74,11 +74,9 @@ src/
     mod.rs            — Runtime definition, context management
     engine.rs         — Bytecode execution, memory limit configuration
     event_loop.rs     — Tokio and JS Promise integration
-  api/                — Standard API callable from JS
-    mod.rs            — API registration traits and common macros
-    fs/               — fs.readFile, writeFile
-    timer/            — setTimeout, setInterval
-    console/          — console.log
+  console.rs          — console.log
+  fs.rs               — fs.readFile, writeFile, exists
+  timer.rs            — setTimeout, setInterval, clearTimeout, clearInterval
   cli/                — Command-line interface
   lib.rs              — Crate entry point
   main.rs             — Binary entry point

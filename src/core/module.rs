@@ -68,7 +68,7 @@ pub async fn run_module<'js>(ctx: &Ctx<'js>, source: &str, filename: &str) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::console::setup_console;
+    use crate::console::setup_console;
     use rquickjs::{loader::FileResolver, AsyncContext, Module};
     use std::fs;
     use std::io::Write;
