@@ -1,15 +1,38 @@
 use rquickjs::{
-    loader::{Resolver, ScriptLoader},
-    AsyncRuntime, Ctx, Module, Result,
+    loader::{Loader, Resolver, ScriptLoader},
+    AsyncRuntime, Ctx, Error, Module, Result,
 };
 use std::path::{Path, PathBuf};
 
+use crate::transpiler::{is_typescript_file, transpile_ts};
+
 pub async fn setup_module_loader(runtime: &AsyncRuntime, root: &Path) {
     let resolver = ModuleResolver::new(root);
-    let loader = ScriptLoader::default()
+    let loader = TsModuleLoader;
+    let js_loader = ScriptLoader::default()
         .with_extension("js")
-        .with_extension("mjs");
-    runtime.set_loader(resolver, loader).await;
+        .with_extension("mjs")
+        .with_extension("ts")
+        .with_extension("tsx");
+    runtime.set_loader(resolver, (loader, js_loader)).await;
+}
+
+struct TsModuleLoader;
+
+impl Loader for TsModuleLoader {
+    fn load<'js>(&mut self, ctx: &Ctx<'js>, path: &str) -> Result<Module<'js>> {
+        if !is_typescript_file(path) {
+            return Err(Error::new_loading(path));
+        }
+
+        let source = std::fs::read_to_string(path)
+            .map_err(|_| Error::new_loading(path))?;
+
+        let transpiled = transpile_ts(&source, path)
+            .map_err(|_| Error::new_loading(path))?;
+
+        Module::declare(ctx.clone(), path, transpiled)
+    }
 }
 
 struct ModuleResolver {
