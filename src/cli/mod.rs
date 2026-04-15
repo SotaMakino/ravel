@@ -3,6 +3,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use axum::handler::HandlerWithoutStateExt;
+use axum::response::IntoResponse;
 use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Result};
 use rustyline::DefaultEditor;
 
@@ -236,6 +238,7 @@ pub fn print_help() {
     println!("Options:");
     println!("  --help, -h       Show this help message");
     println!("  --version, -v    Show version information");
+    println!("  --serve [PORT]   Serve the dist/ directory (default port: 3000)");
     println!("  --build <FILE>   Run script in SSG build mode (one-off, no timers)");
 }
 
@@ -261,7 +264,65 @@ pub fn build(filename: &str) {
     build_source(&source, filename);
 }
 
+async fn html_fallback(req: axum::extract::Request) -> axum::response::Response {
+    let path = req.uri().path().trim_start_matches('/');
+    if path.contains("..") {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+    let html_path = format!("dist/{}.html", path);
+
+    if path.is_empty() {
+        return match tokio::fs::read("dist/index.html").await {
+            Ok(bytes) => axum::response::Html(bytes).into_response(),
+            Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+
+    if let Ok(bytes) = tokio::fs::read(&html_path).await {
+        return axum::response::Html(bytes).into_response();
+    }
+
+    axum::http::StatusCode::NOT_FOUND.into_response()
+}
+
+pub fn serve(port: u16) {
+    let dist_path = Path::new("dist");
+    if !dist_path.exists() {
+        eprintln!("Error: dist/ directory not found. Run `ravel --build <file>` first.");
+        std::process::exit(1);
+    }
+    if !dist_path.is_dir() {
+        eprintln!("Error: dist/ is not a directory.");
+        std::process::exit(1);
+    }
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    rt.block_on(async {
+        let app = axum::Router::new().fallback_service(
+            tower_http::services::ServeDir::new("dist")
+                .fallback(html_fallback.into_service()),
+        );
+
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        println!("Serving dist/ at http://{}", addr);
+
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .expect("Failed to bind to address");
+        axum::serve(listener, app)
+            .await
+            .expect("Server error");
+    });
+}
+
 pub fn build_source(source: &str, filename: &str) {
+    let original_dir = std::env::current_dir().expect("Failed to get current directory");
+    let abs_path = std::path::Path::new(filename)
+        .canonicalize()
+        .expect("Failed to resolve absolute path");
+    let root = abs_path.parent().unwrap().to_path_buf();
+    let script_dist = root.join("dist");
+
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
@@ -270,15 +331,10 @@ pub fn build_source(source: &str, filename: &str) {
             .await
             .expect("Failed to create context");
 
-        let abs_path = std::path::Path::new(filename)
-            .canonicalize()
-            .expect("Failed to resolve absolute path");
-        let root = abs_path.parent().unwrap().to_path_buf();
         let dir = root.to_string_lossy().to_string();
         let file = abs_path.to_string_lossy().to_string();
         let file_name = abs_path.file_name().unwrap().to_string_lossy().to_string();
 
-        let _prev_dir = std::env::current_dir().unwrap_or_default();
         std::env::set_current_dir(&root).expect("Failed to change directory");
 
         setup_module_loader(&runtime, &root).await;
@@ -298,4 +354,13 @@ pub fn build_source(source: &str, filename: &str) {
         })
         .await;
     });
+
+    if script_dist != original_dir.join("dist") && script_dist.exists() {
+        let target = original_dir.join("dist");
+        if target.exists() {
+            let _ = fs::remove_dir_all(&target);
+        }
+        let _ = fs::create_dir_all(target.parent().unwrap());
+        let _ = fs::rename(&script_dist, &target);
+    }
 }

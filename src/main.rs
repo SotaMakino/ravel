@@ -13,6 +13,15 @@ fn main() {
         return;
     }
 
+    if let Some(idx) = args.iter().position(|a| a == "--serve") {
+        let port = args
+            .get(idx + 1)
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(3000);
+        cli::serve(port);
+        return;
+    }
+
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
 
     if args.iter().any(|a| a == "--build") {

@@ -9,6 +9,8 @@ ravel file.js      # run JavaScript
 ravel file.ts      # run TypeScript (auto-transpiled via Oxc)
 ravel              # start REPL
 ravel --build file.js  # SSG build mode (one-off, no timers)
+ravel --serve      # serve dist/ directory on port 3000
+ravel --serve 8080    # serve dist/ directory on custom port
 ravel --help
 ravel --version
 ```
@@ -36,6 +38,7 @@ cargo test
 - **Globals** — `__filename`, `__dirname`, `process.env`, `ravel.version`, `ravel.build`
 - **REPL** — line history with persistence, timer support
 - **SSG build mode** — `--build` flag runs scripts as one-off compilation tasks with `ravel.build === true` and `process.env.RAVEL_BUILD === "1"`
+- **Dev server** — `--serve` flag serves the `dist/` directory over HTTP (default port 3000, configurable)
 
 ## Project Structure
 
@@ -96,6 +99,17 @@ if (ravel.build) {
 ```bash
 ravel --build build.js
 ```
+
+## Dev Server
+
+Serve the output of `--build` over HTTP:
+
+```bash
+ravel --serve          # serve dist/ on port 3000
+ravel --serve 8080     # serve dist/ on port 8080
+```
+
+The server looks for a `dist/` directory in the current working directory and serves its contents. Unknown paths fall back to `dist/index.html` for SPA-style routing.
 
 ## Build Metadata
 

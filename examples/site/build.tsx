@@ -5,7 +5,12 @@ function Layout(props: { title: string; children: string }) {
         <meta charset="utf-8" />
         <title>{props.title}</title>
       </head>
-      <body>{props.children}</body>
+      <body>
+        <nav>
+          <a href="/">Home</a> | <a href="/about">About</a>
+        </nav>
+        {props.children}
+      </body>
     </html>
   );
 }

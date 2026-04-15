@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::process::Command;
 
 fn run_ravel(args: &[&str]) -> (String, String) {
@@ -648,19 +649,77 @@ fn test_short_help_flag() {
 #[test]
 fn test_example_site_build() {
     let _ = std::fs::remove_dir_all("examples/site/dist");
+    let _ = std::fs::remove_dir_all("dist");
     let (out, err) = run_ravel(&["--build", "examples/site/build.tsx"]);
     assert_eq!(err, "");
     assert!(out.contains("wrote dist/index.html"));
     assert!(out.contains("wrote dist/about.html"));
     assert!(out.contains("done"));
 
-    let index = std::fs::read_to_string("examples/site/dist/index.html").unwrap();
+    let index = std::fs::read_to_string("dist/index.html").unwrap();
     assert!(index.contains("<title>Home</title>"));
     assert!(index.contains("<h1>Welcome</h1>"));
 
-    let about = std::fs::read_to_string("examples/site/dist/about.html").unwrap();
+    let about = std::fs::read_to_string("dist/about.html").unwrap();
     assert!(about.contains("<title>About</title>"));
     assert!(about.contains("<h1>About</h1>"));
 
-    let _ = std::fs::remove_dir_all("examples/site/dist");
+    let _ = std::fs::remove_dir_all("dist");
+}
+
+#[test]
+fn test_serve_no_dist_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .args(["--serve"])
+        .current_dir(dir.path())
+        .output()
+        .expect("Failed to execute ravel");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(stderr.contains("dist/ directory not found"));
+}
+
+#[test]
+fn test_serve_serves_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let dist_dir = dir.path().join("dist");
+    std::fs::create_dir_all(&dist_dir).unwrap();
+    std::fs::write(dist_dir.join("index.html"), "<h1>Hello</h1>").unwrap();
+
+    let port = 18765u16;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .args(["--serve", &port.to_string()])
+        .current_dir(dir.path())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to start ravel");
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    let mut stream = std::net::TcpStream::connect_timeout(
+        &format!("127.0.0.1:{}", port).parse().unwrap(),
+        std::time::Duration::from_secs(2),
+    )
+    .expect("Failed to connect to server");
+
+    stream
+        .write_all(b"GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    let response_str = String::from_utf8_lossy(&response);
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(response_str.contains("<h1>Hello</h1>"));
+}
+
+#[test]
+fn test_serve_default_port() {
+    let (out, _err) = run_ravel(&["--help"]);
+    assert!(out.contains("--serve [PORT]"));
 }
