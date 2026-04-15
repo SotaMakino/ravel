@@ -1,22 +1,41 @@
+mod build;
+mod repl;
+mod run;
+mod serve;
+
+pub use build::{build, build_source};
+pub use repl::repl;
+pub use run::{run, run_source};
+pub use serve::serve;
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use axum::handler::HandlerWithoutStateExt;
-use axum::response::IntoResponse;
-use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Result};
-use rustyline::DefaultEditor;
+use rquickjs::{AsyncContext, Ctx, Result};
 
-use crate::timer::{TimerMessage, TimerState, get_timer_state, set_timer_state};
-use crate::console::{value_to_string, setup_console};
+use crate::console::setup_console;
 use crate::fs::setup_fs;
-use crate::timer::setup_timers;
-use crate::core::{run_module, setup_module_loader};
-use crate::transpiler::{is_typescript_file, transpile_ts};
 use crate::jsx::setup_jsx_runtime;
+use crate::timer::{TimerMessage, get_timer_state, setup_timers};
+use crate::transpiler::{is_typescript_file, transpile_ts};
 
 const RAVEL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub fn print_help() {
+    println!("Usage: ravel [OPTIONS] [FILE]");
+    println!();
+    println!("Options:");
+    println!("  --help, -h       Show this help message");
+    println!("  --version, -v    Show version information");
+    println!("  --serve [PORT]   Serve the dist/ directory (default port: 3000)");
+    println!("  --build <FILE>   Run script in SSG build mode (one-off, no timers)");
+}
+
+pub fn print_version() {
+    println!("ravel v{}", RAVEL_VERSION);
+}
 
 fn setup_all_apis<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
     setup_console(ctx)?;
@@ -52,315 +71,213 @@ fn inject_globals<'js>(ctx: &Ctx<'js>, file: &str, dir: &str, build_mode: bool) 
     Ok(())
 }
 
-pub fn run(filename: &str) {
+fn read_and_transpile(filename: &str) -> Option<String> {
     let raw_source = fs::read_to_string(filename).expect("Failed to read file");
-
-    let source = if is_typescript_file(filename) {
+    if is_typescript_file(filename) {
         match transpile_ts(&raw_source, filename) {
-            Ok(js) => js,
+            Ok(js) => Some(js),
             Err(e) => {
                 eprintln!("TypeScript transpile error: {}", e);
-                return;
+                None
             }
         }
     } else {
-        raw_source
-    };
-
-    run_source(&source, filename);
+        Some(raw_source)
+    }
 }
 
-pub fn run_source(source: &str, filename: &str) {
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    rt.block_on(async {
-        let runtime = AsyncRuntime::new().expect("Failed to create runtime");
-        let ctx = AsyncContext::full(&runtime)
-            .await
-            .expect("Failed to create context");
-
-        let (timer_state, mut timer_rx) = TimerState::new();
-        set_timer_state(timer_state.clone());
-
-        let abs_path = std::path::Path::new(filename)
-            .canonicalize()
-            .expect("Failed to resolve absolute path");
-        let root = abs_path.parent().unwrap().to_path_buf();
-        let dir = root.to_string_lossy().to_string();
-        let file = abs_path.to_string_lossy().to_string();
-        let file_name = abs_path.file_name().unwrap().to_string_lossy().to_string();
-
-        let _prev_dir = std::env::current_dir().unwrap_or_default();
-        std::env::set_current_dir(&root).expect("Failed to change directory");
-
-        setup_module_loader(&runtime, &root).await;
-
-        rquickjs::async_with!(ctx => |ctx| {
-            if let Err(e) = setup_all_apis(&ctx, &root) {
-                eprintln!("Environment setup error: {}", e);
-            }
-            if let Err(e) = inject_globals(&ctx, &file, &dir, false) {
-                eprintln!("Global injection error: {}", e);
-            }
-
-            match run_module(&ctx, source, &file_name).await {
-                Ok(_) => {}
-                Err(e) => eprintln!("QuickJS error: {}", e),
-            }
-        })
-        .await;
-
-        loop {
-            tokio::select! {
-                Some(msg) = timer_rx.recv() => {
-                    let ctx_clone = ctx.clone();
-                    rquickjs::async_with!(ctx_clone => |ctx| {
-                        match msg {
-                            TimerMessage::FireTimeout(id) => {
-                                    let _: Result<()> = ctx.eval(format!("__ravel_fire_timer({})", id));
-                                if let Some(state) = get_timer_state() {
-                                    state.entries.lock().unwrap().remove(&id);
-                                }
-                            }
-                            TimerMessage::FireInterval(id) => {
-                                    let _: Result<()> = ctx.eval(format!("__ravel_fire_interval({})", id));
+async fn drain_timers(
+    ctx: &AsyncContext,
+    timer_rx: &mut tokio::sync::mpsc::UnboundedReceiver<TimerMessage>,
+) {
+    loop {
+        tokio::select! {
+            Some(msg) = timer_rx.recv() => {
+                let ctx_clone = ctx.clone();
+                rquickjs::async_with!(ctx_clone => |ctx| {
+                    match msg {
+                        TimerMessage::FireTimeout(id) => {
+                            let _: Result<()> = ctx.eval(format!("__ravel_fire_timer({})", id));
+                            if let Some(state) = get_timer_state() {
+                                state.entries.lock().unwrap().remove(&id);
                             }
                         }
-                    })
-                    .await;
-                }
-                _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                    if let Some(state) = get_timer_state() {
-                        if !state.has_pending() {
-                            break;
+                        TimerMessage::FireInterval(id) => {
+                            let _: Result<()> = ctx.eval(format!("__ravel_fire_interval({})", id));
                         }
-                    } else {
+                    }
+                })
+                .await;
+            }
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                if let Some(state) = get_timer_state() {
+                    if !state.has_pending() {
                         break;
                     }
+                } else {
+                    break;
                 }
             }
         }
-    });
-}
-
-pub fn repl() {
-    let mut rl = DefaultEditor::new().expect("Failed to initialize readline");
-
-    let history_path = dirs::config_dir()
-        .unwrap_or_default()
-        .join("ravel")
-        .join("history");
-    let _ = rl.load_history(&history_path);
-
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    rt.block_on(async {
-        let runtime = AsyncRuntime::new().expect("Failed to create runtime");
-        let ctx = AsyncContext::full(&runtime)
-            .await
-            .expect("Failed to create context");
-
-        let (timer_state, mut timer_rx) = TimerState::new();
-        set_timer_state(timer_state.clone());
-
-        let cwd = std::env::current_dir().unwrap_or_default();
-        let cwd_str = cwd.to_string_lossy().to_string();
-
-        rquickjs::async_with!(ctx => |ctx| {
-            if let Err(e) = setup_all_apis(&ctx, &cwd) {
-                eprintln!("Environment setup error: {}", e);
-            }
-            if let Err(e) = inject_globals(&ctx, "", &cwd_str, false) {
-                eprintln!("Global injection error: {}", e);
-            }
-        })
-        .await;
-
-        println!("ravel v{} (toy JS runtime)", RAVEL_VERSION);
-
-        loop {
-            let line = match rl.readline("> ") {
-                Ok(line) => line,
-                Err(_) => break,
-            };
-
-            let _ = rl.add_history_entry(&line);
-
-            rquickjs::async_with!(ctx => |ctx| {
-                match ctx.eval::<rquickjs::Value, _>(line.as_str()) {
-                    Ok(val) => {
-                        println!("{}", value_to_string(&val));
-                    }
-                    Err(e) => eprintln!("QuickJS error: {}", e),
-                }
-            })
-            .await;
-
-            loop {
-                tokio::select! {
-                    Some(msg) = timer_rx.recv() => {
-                        let ctx_clone = ctx.clone();
-                        rquickjs::async_with!(ctx_clone => |ctx| {
-                            match msg {
-                                TimerMessage::FireTimeout(id) => {
-                                let _: Result<()> = ctx.eval(format!("__ravel_fire_timer({})", id));
-                                    if let Some(state) = get_timer_state() {
-                                        state.entries.lock().unwrap().remove(&id);
-                                    }
-                                }
-                                TimerMessage::FireInterval(id) => {
-                                let _: Result<()> = ctx.eval(format!("__ravel_fire_interval({})", id));
-                                }
-                            }
-                        })
-                        .await;
-                    }
-                    _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                        if let Some(state) = get_timer_state() {
-                            if !state.has_pending() {
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    let _ = rl.save_history(&history_path);
-}
-
-pub fn print_help() {
-    println!("Usage: ravel [OPTIONS] [FILE]");
-    println!();
-    println!("Options:");
-    println!("  --help, -h       Show this help message");
-    println!("  --version, -v    Show version information");
-    println!("  --serve [PORT]   Serve the dist/ directory (default port: 3000)");
-    println!("  --build <FILE>   Run script in SSG build mode (one-off, no timers)");
-}
-
-pub fn print_version() {
-    println!("ravel v{}", RAVEL_VERSION);
-}
-
-pub fn build(filename: &str) {
-    let raw_source = fs::read_to_string(filename).expect("Failed to read file");
-
-    let source = if is_typescript_file(filename) {
-        match transpile_ts(&raw_source, filename) {
-            Ok(js) => js,
-            Err(e) => {
-                eprintln!("TypeScript transpile error: {}", e);
-                return;
-            }
-        }
-    } else {
-        raw_source
-    };
-
-    build_source(&source, filename);
-}
-
-async fn html_fallback(req: axum::extract::Request) -> axum::response::Response {
-    let path = req.uri().path().trim_start_matches('/');
-    if path.contains("..") {
-        return axum::http::StatusCode::NOT_FOUND.into_response();
     }
-    let html_path = format!("dist/{}.html", path);
+}
 
-    if path.is_empty() {
-        return match tokio::fs::read("dist/index.html").await {
-            Ok(bytes) => axum::response::Html(bytes).into_response(),
-            Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
-        };
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rquickjs::Context;
+
+    fn with_ctx<F, R>(f: F) -> R
+    where
+        F: FnOnce(rquickjs::Ctx) -> R,
+    {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(f)
     }
 
-    if let Ok(bytes) = tokio::fs::read(&html_path).await {
-        return axum::response::Html(bytes).into_response();
+    #[test]
+    fn test_inject_globals_sets_filename() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "/path/to/file.js", "/path/to", false).unwrap();
+            let filename: String = ctx.eval("__filename").unwrap();
+            assert_eq!(filename, "/path/to/file.js");
+        });
     }
 
-    axum::http::StatusCode::NOT_FOUND.into_response()
-}
-
-pub fn serve(port: u16) {
-    let dist_path = Path::new("dist");
-    if !dist_path.exists() {
-        eprintln!("Error: dist/ directory not found. Run `ravel --build <file>` first.");
-        std::process::exit(1);
-    }
-    if !dist_path.is_dir() {
-        eprintln!("Error: dist/ is not a directory.");
-        std::process::exit(1);
+    #[test]
+    fn test_inject_globals_sets_dirname() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "/path/to/file.js", "/path/to", false).unwrap();
+            let dirname: String = ctx.eval("__dirname").unwrap();
+            assert_eq!(dirname, "/path/to");
+        });
     }
 
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-    rt.block_on(async {
-        let app = axum::Router::new().fallback_service(
-            tower_http::services::ServeDir::new("dist")
-                .fallback(html_fallback.into_service()),
-        );
+    #[test]
+    fn test_inject_globals_process_env_is_object() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "", "", false).unwrap();
+            let typeof_env: String = ctx.eval("typeof process.env").unwrap();
+            assert_eq!(typeof_env, "object");
+        });
+    }
 
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-        println!("Serving dist/ at http://{}", addr);
+    #[test]
+    fn test_inject_globals_ravel_version() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "", "", false).unwrap();
+            let version: String = ctx.eval("ravel.version").unwrap();
+            assert_eq!(version, RAVEL_VERSION);
+        });
+    }
 
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .expect("Failed to bind to address");
-        axum::serve(listener, app)
-            .await
-            .expect("Server error");
-    });
-}
+    #[test]
+    fn test_inject_globals_build_mode_false() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "", "", false).unwrap();
+            let build: bool = ctx.eval("ravel.build").unwrap();
+            assert!(!build);
+        });
+    }
 
-pub fn build_source(source: &str, filename: &str) {
-    let original_dir = std::env::current_dir().expect("Failed to get current directory");
-    let abs_path = std::path::Path::new(filename)
-        .canonicalize()
-        .expect("Failed to resolve absolute path");
-    let root = abs_path.parent().unwrap().to_path_buf();
-    let script_dist = root.join("dist");
+    #[test]
+    fn test_inject_globals_build_mode_true() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "", "", true).unwrap();
+            let build: bool = ctx.eval("ravel.build").unwrap();
+            assert!(build);
+        });
+    }
 
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    #[test]
+    fn test_inject_globals_ravel_build_env_in_build_mode() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "", "", true).unwrap();
+            let val: String = ctx.eval("process.env.RAVEL_BUILD").unwrap();
+            assert_eq!(val, "1");
+        });
+    }
 
-    rt.block_on(async {
-        let runtime = AsyncRuntime::new().expect("Failed to create runtime");
-        let ctx = AsyncContext::full(&runtime)
-            .await
-            .expect("Failed to create context");
+    #[test]
+    fn test_inject_globals_no_ravel_build_env_in_normal_mode() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "", "", false).unwrap();
+            let result: rquickjs::Value = ctx.eval("process.env.RAVEL_BUILD").unwrap();
+            assert!(result.is_undefined(), "RAVEL_BUILD should be undefined in normal mode");
+        });
+    }
 
-        let dir = root.to_string_lossy().to_string();
-        let file = abs_path.to_string_lossy().to_string();
-        let file_name = abs_path.file_name().unwrap().to_string_lossy().to_string();
+    #[test]
+    fn test_setup_all_apis_injects_console() {
+        with_ctx(|ctx| {
+            let root = std::env::temp_dir();
+            setup_all_apis(&ctx, &root).unwrap();
+            let console: rquickjs::Object = ctx.globals().get("console").unwrap();
+            assert!(console.get::<_, rquickjs::Function>("log").is_ok());
+        });
+    }
 
-        std::env::set_current_dir(&root).expect("Failed to change directory");
+    #[test]
+    fn test_setup_all_apis_injects_timers() {
+        with_ctx(|ctx| {
+            let root = std::env::temp_dir();
+            setup_all_apis(&ctx, &root).unwrap();
+            let set_timeout: rquickjs::Function = ctx.globals().get("setTimeout").unwrap();
+            assert!(set_timeout.is_function());
+        });
+    }
 
-        setup_module_loader(&runtime, &root).await;
+    #[test]
+    fn test_setup_all_apis_injects_fs() {
+        with_ctx(|ctx| {
+            let root = std::env::temp_dir();
+            setup_all_apis(&ctx, &root).unwrap();
+            let fs_obj: rquickjs::Object = ctx.globals().get("fs").unwrap();
+            assert!(fs_obj.get::<_, rquickjs::Function>("readFile").is_ok());
+        });
+    }
 
-        rquickjs::async_with!(ctx => |ctx| {
-            if let Err(e) = setup_all_apis(&ctx, &root) {
-                eprintln!("Environment setup error: {}", e);
-            }
-            if let Err(e) = inject_globals(&ctx, &file, &dir, true) {
-                eprintln!("Global injection error: {}", e);
-            }
+    #[test]
+    fn test_setup_all_apis_injects_note() {
+        with_ctx(|ctx| {
+            let root = std::env::temp_dir();
+            setup_all_apis(&ctx, &root).unwrap();
+            let note: rquickjs::Function = ctx.globals().get("note").unwrap();
+            assert!(note.is_function());
+        });
+    }
 
-            match run_module(&ctx, source, &file_name).await {
-                Ok(_) => {}
-                Err(e) => eprintln!("QuickJS error: {}", e),
-            }
-        })
-        .await;
-    });
+    #[test]
+    fn test_read_and_transpile_js_file() {
+        let dir = std::env::temp_dir().join("ravel_test_read_js");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("test.js");
+        std::fs::write(&file_path, "console.log(42);").unwrap();
+        let result = read_and_transpile(file_path.to_str().unwrap());
+        assert_eq!(result, Some("console.log(42);".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
-    if script_dist != original_dir.join("dist") && script_dist.exists() {
-        let target = original_dir.join("dist");
-        if target.exists() {
-            let _ = fs::remove_dir_all(&target);
-        }
-        let _ = fs::create_dir_all(target.parent().unwrap());
-        let _ = fs::rename(&script_dist, &target);
+    #[test]
+    fn test_read_and_transpile_ts_file() {
+        let dir = std::env::temp_dir().join("ravel_test_read_ts");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("test.ts");
+        std::fs::write(&file_path, "const x: number = 1;").unwrap();
+        let result = read_and_transpile(file_path.to_str().unwrap());
+        assert!(result.is_some());
+        let transpiled = result.unwrap();
+        assert!(!transpiled.contains("number"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_inject_globals_escapes_special_chars_in_paths() {
+        with_ctx(|ctx| {
+            inject_globals(&ctx, "/path/with \"quote/file.js", "/path/with \"quote", false).unwrap();
+            let filename: String = ctx.eval("__filename").unwrap();
+            assert_eq!(filename, "/path/with \"quote/file.js");
+        });
     }
 }
