@@ -4,12 +4,16 @@ function Layout(props: { title: string; children: string }) {
       <head>
         <meta charset="utf-8" />
         <title>{props.title}</title>
+        <base href="/ravel/" />
       </head>
       <body>
         <nav>
-          <a href="/">Home</a> | <a href="/about">About</a>
+          <a href="./">Home</a> | <a href="about">About</a>
         </nav>
         {props.children}
+        <footer>
+          <p>Built with <strong>Ravel v{ravel.version}</strong></p>
+        </footer>
       </body>
     </html>
   );
