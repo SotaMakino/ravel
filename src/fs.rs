@@ -3,6 +3,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn resolve_path(root: &Path, input: &str) -> std::io::Result<PathBuf> {
+    if input.contains('\0') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "null byte in path",
+        ));
+    }
+
     let canon_root = root.canonicalize()?;
 
     let joined = root.join(input);
@@ -19,6 +26,13 @@ fn resolve_path(root: &Path, input: &str) -> std::io::Result<PathBuf> {
 }
 
 fn resolve_path_for_write(root: &Path, input: &str) -> std::io::Result<PathBuf> {
+    if input.contains('\0') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "null byte in path",
+        ));
+    }
+
     let canon_root = root.canonicalize()?;
 
     let joined = root.join(input);
@@ -262,6 +276,69 @@ mod tests {
         let resolved = resolve_path_for_write(&canon_root, "subdir/new.txt").unwrap();
         assert_eq!(resolved, canon_root.join("subdir/new.txt"));
         drop(temp);
+    }
+
+    #[test]
+    fn test_resolve_path_symlink_escape() {
+        let (temp, root) = setup_test_dir().unwrap();
+        let outside_temp = tempfile::tempdir().unwrap();
+        let outside = outside_temp.path().join("outside.txt");
+        fs::write(&outside, "secret").unwrap();
+        let link = root.join("escape_link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&outside, &link).unwrap();
+        let result = resolve_path(&root, "escape_link");
+        assert!(result.is_err(), "symlink escape should be denied");
+        drop(outside_temp);
+        drop(temp);
+    }
+
+    #[test]
+    fn test_resolve_path_symlink_allowed_within_root() {
+        let (temp, root) = setup_test_dir().unwrap();
+        let target = root.join("target.txt");
+        fs::write(&target, "hello").unwrap();
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&target, &link).unwrap();
+        let result = resolve_path(&root, "link");
+        assert!(result.is_ok(), "symlink within root should be allowed");
+        drop(temp);
+    }
+
+    #[test]
+    fn test_resolve_path_for_write_symlink_escape() {
+        let (temp, root) = setup_test_dir().unwrap();
+        let outside_temp = tempfile::tempdir().unwrap();
+        let outside_dir = outside_temp.path().join("outside_dir");
+        fs::create_dir(&outside_dir).unwrap();
+        let link = root.join("escape_link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside_dir, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&outside_dir, &link).unwrap();
+        let result = resolve_path_for_write(&root, "escape_link/file.txt");
+        assert!(result.is_err(), "symlink write escape should be denied");
+        drop(outside_temp);
+        drop(temp);
+    }
+
+    #[test]
+    fn test_resolve_path_null_byte_rejection() {
+        let (_temp, root) = setup_test_dir().unwrap();
+        let result = resolve_path(&root, "file\0.txt");
+        assert!(result.is_err(), "null byte in path should be rejected");
+    }
+
+    #[test]
+    fn test_resolve_path_for_write_null_byte_rejection() {
+        let (_temp, root) = setup_test_dir().unwrap();
+        let result = resolve_path_for_write(&root, "file\0.txt");
+        assert!(result.is_err(), "null byte in write path should be rejected");
     }
 
     #[test]

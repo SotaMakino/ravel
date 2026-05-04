@@ -26,7 +26,7 @@ jobs:
         uses: swatinem/rust-cache@v2
 
       - name: Build Ravel
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Generate Site
         run: ./target/release/ravel --build examples/site/build.tsx

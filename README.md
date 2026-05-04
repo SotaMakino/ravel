@@ -33,7 +33,7 @@ cargo test
 - **TypeScript** — `.ts`/`.tsx` files are stripped of types by Oxc and fed directly into QuickJS
 - **JSX rendering** — `.tsx` files transform JSX into `note()` calls that produce HTML strings
 - **Async runtime** — `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` on a Tokio event loop
-- **Sandboxed fs** — `fs.readFile`, `fs.writeFile` (auto-creates parent dirs), `fs.mkdirSync`, `fs.exists` scoped to the script's directory
+- **Sandboxed fs** — `fs.readFile`, `fs.writeFile` (auto-creates parent dirs), `fs.mkdirSync`, `fs.exists` scoped to the script's directory; path traversal, symlink escape, and null byte attacks are blocked
 - **ESM imports** — relative and bare imports with `.js`, `.mjs`, `.ts`, `.tsx` resolution
 - **Globals** — `__filename`, `__dirname`, `process.env`, `ravel.version`, `ravel.build`
 - **REPL** — line history with persistence, timer support
