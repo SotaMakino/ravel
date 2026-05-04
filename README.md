@@ -145,3 +145,9 @@ fs.writeFile("dist/posts/hello/index.html", html);
 fs.mkdirSync("dist/assets/css");  // creates dist/assets/css
 fs.mkdirSync("dist");             // no-op if already exists
 ```
+
+## Roadmap
+
+- [ ] **Web Standard APIs** — Implement foundational web APIs such as `fetch`, `Request`/`Response`, `URL`/`URLSearchParams`, `TextEncoder`/`TextDecoder`, `crypto`, `AbortController`, `ReadableStream`/`WritableStream`, and `DOMException` to improve compatibility with existing JS/TS libraries
+- [ ] **Package manager and module resolutions** — Build a built-in package manager for installing and versioning dependencies from npm registries, and implement Node-style module resolution algorithms (node_modules lookup, package.json exports/imports map, conditional exports, and self-referencing imports) so bare imports like `import { serve } from "std/http"` work seamlessly
+- [ ] **High-performance HTTP server** — Implement a production-grade HTTP/1.1 & HTTP/2 server built on `tokio` + `hyper` with keep-alive connections, streaming request/response bodies, automatic compression (gzip/brotli), graceful shutdown, and middleware support for building web applications

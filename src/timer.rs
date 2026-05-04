@@ -83,6 +83,64 @@ fn get_or_create_timer_obj<'js>(ctx: &Ctx<'js>, name: &str) -> Result<rquickjs::
     }
 }
 
+fn clear_timer_js(ctx: &Ctx<'_>, id: u32) {
+    let _: Result<()> = ctx.eval(format!(
+        "if(__ravel_timer_fns[{}]){{delete __ravel_timer_fns[{}];delete __ravel_timer_args[{}];}}",
+        id, id, id
+    ));
+    if let Some(state) = get_timer_state() {
+        state.cancel(id);
+    }
+}
+
+fn schedule_timer<'js>(
+    ctx: &Ctx<'js>,
+    callback: rquickjs::Function<'js>,
+    delay_ms: u64,
+    args: Rest<Value<'js>>,
+    repeat: bool,
+) -> Result<u32> {
+    let id = next_timer_id();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_clone = cancelled.clone();
+
+    let timers_obj = get_or_create_timer_obj(ctx, "__ravel_timer_fns")?;
+    timers_obj.set(id, callback)?;
+
+    if !args.0.is_empty() {
+        let args_obj = get_or_create_timer_obj(ctx, "__ravel_timer_args")?;
+        let args_array = rquickjs::Array::new(ctx.clone())?;
+        for (i, arg) in args.0.iter().enumerate() {
+            args_array.set(i, arg.clone())?;
+        }
+        args_obj.set(id, args_array)?;
+    }
+
+    if let Some(state) = get_timer_state() {
+        state.register(id, cancelled);
+        let sender = state.sender.clone();
+        tokio::spawn(async move {
+            if repeat {
+                loop {
+                    sleep(Duration::from_millis(delay_ms)).await;
+                    if cancelled_clone.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let _ = sender.send(TimerMessage::FireInterval(id));
+                }
+            } else {
+                sleep(Duration::from_millis(delay_ms)).await;
+                if cancelled_clone.load(Ordering::SeqCst) {
+                    return;
+                }
+                let _ = sender.send(TimerMessage::FireTimeout(id));
+            }
+        });
+    }
+
+    Ok(id)
+}
+
 pub fn setup_timers<'js>(ctx: &Ctx<'js>) -> Result<()> {
     ctx.eval::<(), _>(r#"
         var __ravel_timer_fns = {};
@@ -105,36 +163,7 @@ pub fn setup_timers<'js>(ctx: &Ctx<'js>) -> Result<()> {
         "setTimeout",
         rquickjs::function::Func::new(move |ctx: Ctx<'js>, callback: rquickjs::Function<'js>, delay: Option<f64>, args: Rest<Value<'js>>| -> Result<u32> {
             let delay_ms = delay.unwrap_or(0.0).max(0.0) as u64;
-
-            let id = next_timer_id();
-            let cancelled = Arc::new(AtomicBool::new(false));
-            let cancelled_clone = cancelled.clone();
-
-            let timers_obj = get_or_create_timer_obj(&ctx, "__ravel_timer_fns")?;
-            timers_obj.set(id, callback)?;
-
-            if !args.0.is_empty() {
-                let args_obj = get_or_create_timer_obj(&ctx, "__ravel_timer_args")?;
-                let args_array = rquickjs::Array::new(ctx.clone())?;
-                for (i, arg) in args.0.iter().enumerate() {
-                    args_array.set(i, arg.clone())?;
-                }
-                args_obj.set(id, args_array)?;
-            }
-
-            if let Some(state) = get_timer_state() {
-                state.register(id, cancelled);
-                let sender = state.sender.clone();
-                tokio::spawn(async move {
-                    sleep(Duration::from_millis(delay_ms)).await;
-                    if cancelled_clone.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    let _ = sender.send(TimerMessage::FireTimeout(id));
-                });
-            }
-
-            Ok(id)
+            schedule_timer(&ctx, callback, delay_ms, args, false)
         }),
     )?;
 
@@ -142,64 +171,21 @@ pub fn setup_timers<'js>(ctx: &Ctx<'js>) -> Result<()> {
         "setInterval",
         rquickjs::function::Func::new(move |ctx: Ctx<'js>, callback: rquickjs::Function<'js>, interval: Option<f64>, args: Rest<Value<'js>>| -> Result<u32> {
             let interval_ms = interval.unwrap_or(0.0).max(0.0) as u64;
-
-            let id = next_timer_id();
-            let cancelled = Arc::new(AtomicBool::new(false));
-            let cancelled_clone = cancelled.clone();
-
-            let timers_obj = get_or_create_timer_obj(&ctx, "__ravel_timer_fns")?;
-            timers_obj.set(id, callback)?;
-
-            if !args.0.is_empty() {
-                let args_obj = get_or_create_timer_obj(&ctx, "__ravel_timer_args")?;
-                let args_array = rquickjs::Array::new(ctx.clone())?;
-                for (i, arg) in args.0.iter().enumerate() {
-                    args_array.set(i, arg.clone())?;
-                }
-                args_obj.set(id, args_array)?;
-            }
-
-            if let Some(state) = get_timer_state() {
-                state.register(id, cancelled);
-                let sender = state.sender.clone();
-                tokio::spawn(async move {
-                    loop {
-                        sleep(Duration::from_millis(interval_ms)).await;
-                        if cancelled_clone.load(Ordering::SeqCst) {
-                            break;
-                        }
-                        let _ = sender.send(TimerMessage::FireInterval(id));
-                    }
-                });
-            }
-
-            Ok(id)
+            schedule_timer(&ctx, callback, interval_ms, args, true)
         }),
     )?;
 
     ctx.globals().set(
         "clearTimeout",
         rquickjs::function::Func::new(|ctx: Ctx<'_>, id: u32| {
-            let _: Result<()> = ctx.eval(format!(
-                "if(__ravel_timer_fns[{}]){{delete __ravel_timer_fns[{}];delete __ravel_timer_args[{}];}}",
-                id, id, id
-            ));
-            if let Some(state) = get_timer_state() {
-                state.cancel(id);
-            }
+            clear_timer_js(&ctx, id);
         }),
     )?;
 
     ctx.globals().set(
         "clearInterval",
         rquickjs::function::Func::new(|ctx: Ctx<'_>, id: u32| {
-            let _: Result<()> = ctx.eval(format!(
-                "if(__ravel_timer_fns[{}]){{delete __ravel_timer_fns[{}];delete __ravel_timer_args[{}];}}",
-                id, id, id
-            ));
-            if let Some(state) = get_timer_state() {
-                state.cancel(id);
-            }
+            clear_timer_js(&ctx, id);
         }),
     )?;
 
