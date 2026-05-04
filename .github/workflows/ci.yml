@@ -1,4 +1,4 @@
-name: Rust
+name: CI
 
 on:
   push:
@@ -38,6 +38,4 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cargo audit
-        uses: rustsec/audit-check@v2
-        with:
-          working-directory: .
+        run: cargo audit
