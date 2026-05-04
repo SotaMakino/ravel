@@ -44,12 +44,14 @@ cargo test
 
 ```
 src/
+  core.rs       — module declarations for core/
   core/         — QuickJS runtime, module loader, event loop
   transpiler.rs — Oxc TypeScript-to-JavaScript transpiler (with JSX support)
   jsx.rs        — note() HTML renderer (Hono-style JSX runtime)
   console.rs    — console.log
   fs.rs         — sandboxed filesystem
   timer.rs      — setTimeout / setInterval
+  cli.rs        — module declarations for cli/
   cli/          — CLI entry point
 examples/       — usage demos
 tests/          — integration + snapshot tests
