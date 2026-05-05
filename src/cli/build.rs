@@ -1,11 +1,8 @@
 use std::fs;
 
+use crate::core::{Engine, run_module, setup_module_loader};
 
-use rquickjs::{AsyncContext, AsyncRuntime};
-
-use crate::core::{run_module, setup_module_loader};
-
-use super::{inject_globals, read_and_transpile, setup_all_apis};
+use super::read_and_transpile;
 
 pub fn build(filename: &str) {
     let source = match read_and_transpile(filename) {
@@ -26,10 +23,7 @@ pub fn build_source(source: &str, filename: &str) {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
-        let runtime = AsyncRuntime::new().expect("Failed to create runtime");
-        let ctx = AsyncContext::full(&runtime)
-            .await
-            .expect("Failed to create context");
+        let engine = Engine::new().await;
 
         let dir = root.to_string_lossy().to_string();
         let file = abs_path.to_string_lossy().to_string();
@@ -37,13 +31,13 @@ pub fn build_source(source: &str, filename: &str) {
 
         std::env::set_current_dir(&root).expect("Failed to change directory");
 
-        setup_module_loader(&runtime, &root).await;
+        setup_module_loader(&engine.runtime, &root).await;
 
-        rquickjs::async_with!(ctx => |ctx| {
-            if let Err(e) = setup_all_apis(&ctx, &root) {
+        rquickjs::async_with!(engine.context => |ctx| {
+            if let Err(e) = Engine::setup_all_apis(&ctx, &root) {
                 eprintln!("Environment setup error: {}", e);
             }
-            if let Err(e) = inject_globals(&ctx, &file, &dir, true) {
+            if let Err(e) = Engine::inject_globals(&ctx, &file, &dir, true) {
                 eprintln!("Global injection error: {}", e);
             }
 
@@ -64,4 +58,3 @@ pub fn build_source(source: &str, filename: &str) {
         let _ = fs::rename(&script_dist, &target);
     }
 }
-

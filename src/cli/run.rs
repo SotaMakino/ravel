@@ -1,11 +1,8 @@
 use std::path::Path;
 
-use rquickjs::{AsyncContext, AsyncRuntime};
+use crate::core::{Engine, run_module, setup_module_loader};
 
-use crate::core::{run_module, setup_module_loader};
-use crate::timer::{TimerState, set_timer_state};
-
-use super::{drain_timers, inject_globals, read_and_transpile, setup_all_apis};
+use super::read_and_transpile;
 
 pub fn run(filename: &str) {
     let source = match read_and_transpile(filename) {
@@ -19,13 +16,7 @@ pub fn run_source(source: &str, filename: &str) {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
-        let runtime = AsyncRuntime::new().expect("Failed to create runtime");
-        let ctx = AsyncContext::full(&runtime)
-            .await
-            .expect("Failed to create context");
-
-        let (timer_state, mut timer_rx) = TimerState::new();
-        set_timer_state(timer_state.clone());
+        let mut engine = Engine::new().await;
 
         let abs_path = Path::new(filename)
             .canonicalize()
@@ -38,13 +29,13 @@ pub fn run_source(source: &str, filename: &str) {
         let _prev_dir = std::env::current_dir().unwrap_or_default();
         std::env::set_current_dir(&root).expect("Failed to change directory");
 
-        setup_module_loader(&runtime, &root).await;
+        setup_module_loader(&engine.runtime, &root).await;
 
-        rquickjs::async_with!(ctx => |ctx| {
-            if let Err(e) = setup_all_apis(&ctx, &root) {
+        rquickjs::async_with!(engine.context => |ctx| {
+            if let Err(e) = Engine::setup_all_apis(&ctx, &root) {
                 eprintln!("Environment setup error: {}", e);
             }
-            if let Err(e) = inject_globals(&ctx, &file, &dir, false) {
+            if let Err(e) = Engine::inject_globals(&ctx, &file, &dir, false) {
                 eprintln!("Global injection error: {}", e);
             }
 
@@ -55,7 +46,6 @@ pub fn run_source(source: &str, filename: &str) {
         })
         .await;
 
-        drain_timers(&ctx, &mut timer_rx).await;
+        engine.drain_timers().await;
     });
 }
-

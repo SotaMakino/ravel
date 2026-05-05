@@ -1,10 +1,8 @@
-use rquickjs::{AsyncContext, AsyncRuntime};
+use rquickjs;
 use rustyline::DefaultEditor;
 
 use crate::console::value_to_string;
-use crate::timer::{TimerState, set_timer_state};
-
-use super::{RAVEL_VERSION, drain_timers, inject_globals, setup_all_apis};
+use crate::core::Engine;
 
 pub fn repl() {
     let mut rl = DefaultEditor::new().expect("Failed to initialize readline");
@@ -18,28 +16,22 @@ pub fn repl() {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
-        let runtime = AsyncRuntime::new().expect("Failed to create runtime");
-        let ctx = AsyncContext::full(&runtime)
-            .await
-            .expect("Failed to create context");
-
-        let (timer_state, mut timer_rx) = TimerState::new();
-        set_timer_state(timer_state.clone());
+        let mut engine = Engine::new().await;
 
         let cwd = std::env::current_dir().unwrap_or_default();
         let cwd_str = cwd.to_string_lossy().to_string();
 
-        rquickjs::async_with!(ctx => |ctx| {
-            if let Err(e) = setup_all_apis(&ctx, &cwd) {
+        rquickjs::async_with!(engine.context => |ctx| {
+            if let Err(e) = Engine::setup_all_apis(&ctx, &cwd) {
                 eprintln!("Environment setup error: {}", e);
             }
-            if let Err(e) = inject_globals(&ctx, "", &cwd_str, false) {
+            if let Err(e) = Engine::inject_globals(&ctx, "", &cwd_str, false) {
                 eprintln!("Global injection error: {}", e);
             }
         })
         .await;
 
-        println!("ravel v{} (toy JS runtime)", RAVEL_VERSION);
+        println!("ravel v{} (toy JS runtime)", crate::core::RAVEL_VERSION);
 
         loop {
             let line = match rl.readline("> ") {
@@ -49,7 +41,7 @@ pub fn repl() {
 
             let _ = rl.add_history_entry(&line);
 
-            rquickjs::async_with!(ctx => |ctx| {
+            rquickjs::async_with!(engine.context => |ctx| {
                 match ctx.eval::<rquickjs::Value, _>(line.as_str()) {
                     Ok(val) => {
                         println!("{}", value_to_string(&val));
@@ -59,7 +51,7 @@ pub fn repl() {
             })
             .await;
 
-            drain_timers(&ctx, &mut timer_rx).await;
+            engine.drain_timers().await;
         }
     });
 
