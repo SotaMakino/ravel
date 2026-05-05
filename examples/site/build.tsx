@@ -1,37 +1,110 @@
-function Layout(props: { title: string; children: string }) {
-  return (
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <title>{props.title}</title>
-        <base href="/ravel/" />
-      </head>
-      <body>
-        <nav>
-          <a href="./">Home</a> | <a href="about">About</a>
-        </nav>
-        {props.children}
-        <footer>
-          <p>Built with <strong>Ravel v{ravel.version}</strong></p>
-        </footer>
-      </body>
-    </html>
-  );
+import { Layout } from "./components.tsx";
+import { PostCard } from "./components.tsx";
+
+function toBytes(str: string): Uint8Array {
+  var bytes = new Uint8Array(str.length);
+  for (var i = 0; i < str.length; i++) {
+    bytes[i] = str.charCodeAt(i);
+  }
+  return bytes;
 }
 
-const pages = [
-  { path: "index.html", title: "Home", body: <><h1>Welcome</h1><p>A minimal ravel site.</p></> },
-  { path: "about.html", title: "About", body: <><h1>About</h1><p>Built with ravel.</p></> },
+function writePage(path: string, html: string) {
+  fs.writeFile(path, toBytes("<!DOCTYPE html>" + html));
+  console.log("wrote " + path);
+}
+
+var posts = [
+  { slug: "hello-world", title: "Hello World", date: "2026-01-15", body: "First post on my new site." },
+  { slug: "ravel-intro", title: "Building with Ravel", date: "2026-02-01", body: "How I built this site using Ravel's SSG capabilities." },
+  { slug: "deployment", title: "Going Live", date: "2026-03-10", body: "Tips for deploying your static site." },
 ];
 
-for (const page of pages) {
-  const html = "<!DOCTYPE html>" + <Layout title={page.title}>{page.body}</Layout>;
-  const bytes = new Uint8Array(html.length);
-  for (var i = 0; i < html.length; i++) {
-    bytes[i] = html.charCodeAt(i);
-  }
-  fs.writeFile("dist/" + page.path, bytes);
-  console.log("wrote dist/" + page.path);
-}
+if (!ravel.build) {
+  console.error("This script must be run in build mode: ravel --build build.tsx");
+} else {
+  console.log("Building with ravel v" + ravel.version);
+  console.log("__filename: " + __filename);
+  console.log("__dirname: " + __dirname);
+  console.log("RAVEL_BUILD=" + process.env.RAVEL_BUILD);
 
-console.log("done - " + pages.length + " pages (ravel " + ravel.version + ")");
+  // Create dist directories
+  fs.mkdirSync("dist/blog");
+
+  // Generate CSS
+  var css = [
+    "* { margin: 0; padding: 0; box-sizing: border-box; }",
+    "body { font-family: system-ui, sans-serif; line-height: 1.6; color: #222; max-width: 800px; margin: 0 auto; padding: 1rem; }",
+    "header { border-bottom: 2px solid #eee; padding: 1rem 0; margin-bottom: 2rem; }",
+    "nav a { margin-right: 1rem; text-decoration: none; color: #0066cc; }",
+    "nav a:hover { text-decoration: underline; }",
+    "main { min-height: 60vh; }",
+    "footer { border-top: 2px solid #eee; padding: 1rem 0; margin-top: 2rem; color: #888; font-size: 0.9rem; }",
+    ".post-card { margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }",
+    ".post-card h2 { margin-bottom: 0.25rem; }",
+    ".post-card a { color: #0066cc; text-decoration: none; }",
+    ".post-card a:hover { text-decoration: underline; }",
+    "time { color: #999; font-size: 0.85rem; }",
+    "article { margin-bottom: 1.5rem; }",
+    "h1 { margin-bottom: 0.5rem; }",
+  ].join("\n");
+  fs.writeFile("dist/style.css", toBytes(css));
+  console.log("wrote dist/style.css");
+
+  // Home page
+  writePage("dist/index.html",
+    <Layout title="Home">
+      <h1>Welcome</h1>
+      <p>A static site built with Ravel.</p>
+      <h2>Recent Posts</h2>
+      {posts.map(function(p) {
+        return <PostCard slug={p.slug} title={p.title} date={p.date} excerpt={p.body} />;
+      })}
+    </Layout>
+  );
+
+  // About page
+  writePage("dist/about.html",
+    <Layout title="About">
+      <h1>About</h1>
+      <p>This site is generated using Ravel, a minimal JS/TSX runtime for static site generation.</p>
+      <h2>Features</h2>
+      <ul>
+        <li>JSX templating with component composition</li>
+        <li>TypeScript/TSX support</li>
+        <li>ES module imports</li>
+        <li>Sandboxed filesystem access</li>
+      </ul>
+      <p>Check out the <a href="blog">blog</a> for more.</p>
+    </Layout>
+  );
+
+  // Blog index
+  writePage("dist/blog/index.html",
+    <Layout title="Blog">
+      <h1>Blog</h1>
+      {posts.map(function(p) {
+        return <PostCard slug={p.slug} title={p.title} date={p.date} excerpt={p.body} />;
+      })}
+    </Layout>
+  );
+
+  // Individual blog posts
+  for (var i = 0; i < posts.length; i++) {
+    var post = posts[i];
+    writePage("dist/blog/" + post.slug + ".html",
+      <Layout title={post.title}>
+        <h1>{post.title}</h1>
+        <time>{post.date}</time>
+        <p>{post.body}</p>
+        <p><a href="./">Back to blog</a></p>
+      </Layout>
+    );
+  }
+
+  // Read back a generated file to verify
+  var existing = fs.exists("dist/index.html");
+  console.log("dist/index.html exists: " + existing);
+
+  console.log("done - " + (3 + posts.length) + " pages, 1 CSS");
+}

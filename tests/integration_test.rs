@@ -654,6 +654,8 @@ fn test_example_site_build() {
     assert_eq!(err, "");
     assert!(out.contains("wrote dist/index.html"));
     assert!(out.contains("wrote dist/about.html"));
+    assert!(out.contains("wrote dist/style.css"));
+    assert!(out.contains("wrote dist/blog/index.html"));
     assert!(out.contains("done"));
 
     let index = std::fs::read_to_string("dist/index.html").unwrap();
@@ -663,6 +665,12 @@ fn test_example_site_build() {
     let about = std::fs::read_to_string("dist/about.html").unwrap();
     assert!(about.contains("<title>About</title>"));
     assert!(about.contains("<h1>About</h1>"));
+
+    let css = std::fs::read_to_string("dist/style.css").unwrap();
+    assert!(css.contains("font-family"));
+
+    let blog_index = std::fs::read_to_string("dist/blog/index.html").unwrap();
+    assert!(blog_index.contains("<title>Blog</title>"));
 
     let _ = std::fs::remove_dir_all("dist");
 }

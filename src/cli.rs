@@ -204,7 +204,10 @@ mod tests {
         with_ctx(|ctx| {
             inject_globals(&ctx, "", "", false).unwrap();
             let result: rquickjs::Value = ctx.eval("process.env.RAVEL_BUILD").unwrap();
-            assert!(result.is_undefined(), "RAVEL_BUILD should be undefined in normal mode");
+            assert!(
+                result.is_undefined(),
+                "RAVEL_BUILD should be undefined in normal mode"
+            );
         });
     }
 
@@ -275,7 +278,13 @@ mod tests {
     #[test]
     fn test_inject_globals_escapes_special_chars_in_paths() {
         with_ctx(|ctx| {
-            inject_globals(&ctx, "/path/with \"quote/file.js", "/path/with \"quote", false).unwrap();
+            inject_globals(
+                &ctx,
+                "/path/with \"quote/file.js",
+                "/path/with \"quote",
+                false,
+            )
+            .unwrap();
             let filename: String = ctx.eval("__filename").unwrap();
             assert_eq!(filename, "/path/with \"quote/file.js");
         });

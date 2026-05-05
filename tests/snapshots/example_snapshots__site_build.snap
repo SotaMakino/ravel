@@ -3,8 +3,18 @@ source: tests/example_snapshots.rs
 expression: output
 ---
 === STDOUT ===
+Building with ravel v0.3.0
+__filename: /Users/sota/ravel/examples/site/build.tsx
+__dirname: /Users/sota/ravel/examples/site
+RAVEL_BUILD=1
+wrote dist/style.css
 wrote dist/index.html
 wrote dist/about.html
-done - 2 pages (ravel 0.3.0)
+wrote dist/blog/index.html
+wrote dist/blog/hello-world.html
+wrote dist/blog/ravel-intro.html
+wrote dist/blog/deployment.html
+dist/index.html exists: true
+done - 6 pages, 1 CSS
 
 === STDERR ===

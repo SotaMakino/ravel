@@ -98,8 +98,30 @@ if (ravel.build) {
 }
 ```
 
+Build scripts can also use ESM imports, JSX components, and `fs.mkdirSync` for multi-page sites:
+
+```tsx
+// components.tsx
+export function Layout(props) {
+  return (
+    <html lang="en">
+      <head><title>{props.title}</title></head>
+      <body>{props.children}</body>
+    </html>
+  );
+}
+```
+
+```tsx
+// build.tsx
+import { Layout } from "./components.tsx";
+
+fs.mkdirSync("dist/blog");
+fs.writeFile("dist/index.html", toBytes("<!DOCTYPE html>" + <Layout title="Home"><h1>Welcome</h1></Layout>));
+```
+
 ```bash
-ravel --build build.js
+ravel --build build.tsx
 ```
 
 ## Dev Server
