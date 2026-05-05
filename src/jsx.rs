@@ -34,7 +34,7 @@ function _makeHtml(str) {
 }
 function note(tag, props, ...children) {
     if (tag === note) {
-        return _makeHtml(children.flat().map(_toHtml).join(''));
+        return _makeHtml(children.flat(Infinity).map(_toHtml).join(''));
     }
     if (typeof tag === 'function') {
         const p = Object.assign({}, props || {});
@@ -58,7 +58,7 @@ function note(tag, props, ...children) {
         }
     }
     const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
-    const kids = (children || []).flat().map(_toHtml).join('');
+    const kids = (children || []).flat(Infinity).map(_toHtml).join('');
     if (voidTags.has(tag)) {
         return _makeHtml('<' + tag + attrs + '>');
     }
