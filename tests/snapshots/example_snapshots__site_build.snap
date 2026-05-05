@@ -4,8 +4,8 @@ expression: output
 ---
 === STDOUT ===
 Building with ravel v0.3.0
-__filename: /Users/sota/ravel/examples/site/build.tsx
-__dirname: /Users/sota/ravel/examples/site
+__filename: <PROJECT_ROOT>/examples/site/build.tsx
+__dirname: <PROJECT_ROOT>/examples/site
 RAVEL_BUILD=1
 wrote dist/style.css
 wrote dist/index.html
