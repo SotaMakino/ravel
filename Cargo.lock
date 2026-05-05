@@ -1392,6 +1392,8 @@ dependencies = [
  "oxc_transformer",
  "rquickjs",
  "rustyline",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tower-http",

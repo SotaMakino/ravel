@@ -1,4 +1,5 @@
 use ravel::cli;
+use ravel::config::Config;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -13,12 +14,20 @@ fn main() {
         return;
     }
 
+    let config = Config::load();
+
     if let Some(idx) = args.iter().position(|a| a == "--serve") {
         let port = args
             .get(idx + 1)
             .and_then(|s| s.parse::<u16>().ok())
-            .unwrap_or(3000);
-        cli::serve(port);
+            .unwrap_or(config.port);
+        let base = args
+            .iter()
+            .position(|a| a == "--base")
+            .and_then(|i| args.get(i + 1))
+            .map(|s| s.as_str())
+            .unwrap_or(&config.base);
+        cli::serve(port, base);
         return;
     }
 

@@ -17,10 +17,16 @@ pub fn print_help() {
     println!("Usage: ravel [OPTIONS] [FILE]");
     println!();
     println!("Options:");
-    println!("  --help, -h       Show this help message");
-    println!("  --version, -v    Show version information");
-    println!("  --serve [PORT]   Serve the dist/ directory (default port: 3000)");
-    println!("  --build <FILE>   Run script in SSG build mode (one-off, no timers)");
+    println!("  --help, -h         Show this help message");
+    println!("  --version, -v      Show version information");
+    println!("  --serve [PORT]     Serve the dist/ directory (default port: 3000)");
+    println!("  --base <PATH>      Base path prefix to strip when serving (e.g. /repo-name)");
+    println!("  --build <FILE>     Run script in SSG build mode (one-off, no timers)");
+    println!();
+    println!("Config:");
+    println!("  Reads ravel.json from CWD if present. CLI flags override config values.");
+    println!("  Example ravel.json:");
+    println!(r#"    {{ "base": "/repo-name", "port": 8080 }}"#);
 }
 
 pub fn print_version() {
