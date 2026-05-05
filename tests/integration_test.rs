@@ -671,6 +671,7 @@ fn test_example_site_build() {
 
     let blog_index = std::fs::read_to_string("dist/blog/index.html").unwrap();
     assert!(blog_index.contains("<title>Blog</title>"));
+    assert!(blog_index.contains("/ravel/style.css"));
 
     let _ = std::fs::remove_dir_all("dist");
 }
