@@ -6,11 +6,14 @@ expression: output
 Testing fs module...
 sandbox.js exists: true
 nonexistent.txt exists: false
+readFile returns: Promise
 readFile type: object
-readFile length: 1025
+readFile length: 1337
 First 50 bytes as string: // Test fs sandbox - path traversal should be deni
 Wrote to output.txt
 Read back: Hello from Ravel!
+Concurrent reads: 3
+Sync read back: written synchronously
 __filename: <PROJECT_ROOT>/examples/fs.js
 __dirname: <PROJECT_ROOT>/examples
 All tests passed!

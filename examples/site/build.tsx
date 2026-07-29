@@ -2,7 +2,7 @@ import { Layout } from "./components.tsx";
 import { PostCard } from "./components.tsx";
 
 function writePage(path: string, html: string) {
-  fs.writeFile(path, "<!DOCTYPE html>" + html);
+  fs.writeFileSync(path, "<!DOCTYPE html>" + html);
   console.log("wrote " + path);
 }
 
@@ -40,7 +40,7 @@ if (!ravel.build) {
     "article { margin-bottom: 1.5rem; }",
     "h1 { margin-bottom: 0.5rem; }",
   ].join("\n");
-  fs.writeFile("dist/style.css", css);
+  fs.writeFileSync("dist/style.css", css);
   console.log("wrote dist/style.css");
 
   // Home page

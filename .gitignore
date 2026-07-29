@@ -2,3 +2,4 @@
 examples/*/dist
 /dist
 examples/encoding-out.*
+examples/output-sync.txt

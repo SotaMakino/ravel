@@ -621,7 +621,7 @@ fn test_fs_mkdir_sync_nested() {
 fn test_fs_write_file_creates_directories() {
     let source = r#"
         var data = new Uint8Array([72, 101, 108, 108, 111]);
-        fs.writeFile("nested/deep/file.txt", data);
+        fs.writeFileSync("nested/deep/file.txt", data);
         console.log(fs.exists("nested/deep/file.txt"));
     "#;
     let (out, err) = run_file("write_nested.js", source);
@@ -965,7 +965,7 @@ fn test_readme_ssg_example_runs() {
     let script = dir.join("build.js");
     std::fs::write(
         &script,
-        r#"fs.writeFile("dist/index.html", new TextEncoder().encode("<h1>Built</h1>"));"#,
+        r#"await fs.writeFile("dist/index.html", new TextEncoder().encode("<h1>Built</h1>"));"#,
     )
     .unwrap();
     let (_out, err, code) = run_ravel_status(&["--build", script.to_str().unwrap()]);
@@ -981,8 +981,8 @@ fn test_readme_ssg_example_runs() {
 fn test_write_file_accepts_string() {
     let (out, err) = run_file(
         "write_str.js",
-        r#"fs.writeFile("ws.txt", "plain string");
-           console.log(new TextDecoder().decode(fs.readFile("ws.txt")));"#,
+        r#"await fs.writeFile("ws.txt", "plain string");
+           console.log(new TextDecoder().decode(await fs.readFile("ws.txt")));"#,
     );
     assert_eq!(err, "");
     assert!(out.contains("plain string"));
@@ -992,8 +992,8 @@ fn test_write_file_accepts_string() {
 fn test_write_file_still_accepts_bytes() {
     let (out, err) = run_file(
         "write_bytes.js",
-        r#"fs.writeFile("wb.txt", new TextEncoder().encode("from bytes"));
-           console.log(new TextDecoder().decode(fs.readFile("wb.txt")));"#,
+        r#"await fs.writeFile("wb.txt", new TextEncoder().encode("from bytes"));
+           console.log(new TextDecoder().decode(await fs.readFile("wb.txt")));"#,
     );
     assert_eq!(err, "");
     assert!(out.contains("from bytes"));
@@ -1001,7 +1001,7 @@ fn test_write_file_still_accepts_bytes() {
 
 #[test]
 fn test_write_file_rejects_other_types() {
-    let (_out, err, code) = run_file_status("write_bad.js", r#"fs.writeFile("bad.txt", {});"#);
+    let (_out, err, code) = run_file_status("write_bad.js", r#"await fs.writeFile("bad.txt", {});"#);
     assert!(err.contains("Uncaught"), "stderr was: {}", err);
     assert_eq!(code, 1);
 }
@@ -1080,4 +1080,153 @@ fn test_process_env_survives_quotes_in_values() {
     let _ = std::fs::remove_file(&tmp);
     let out = String::from_utf8_lossy(&output.stdout);
     assert!(out.contains(r#"has "quotes" and \backslash"#), "stdout was: {}", out);
+}
+
+// --- Async fs ---
+
+#[test]
+fn test_read_file_returns_a_promise() {
+    let (out, err) = run_file(
+        "async_shape.js",
+        r#"fs.writeFileSync("shape.txt", "x");
+           console.log(fs.readFile("shape.txt").constructor.name);"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("Promise"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_read_file_resolves_after_synchronous_code() {
+    // The promise must not settle before the module body finishes, or the
+    // read was really synchronous.
+    let (out, err) = run_file(
+        "async_order.js",
+        r#"fs.writeFileSync("order.txt", "data");
+           fs.readFile("order.txt").then(() => console.log("2 async"));
+           console.log("1 sync");"#,
+    );
+    assert_eq!(err, "");
+    let sync_at = out.find("1 sync").expect("missing sync line");
+    let async_at = out.find("2 async").expect("missing async line");
+    assert!(sync_at < async_at, "wrong order: {}", out);
+}
+
+#[test]
+fn test_pending_read_is_not_abandoned_at_exit() {
+    // Regression: the runtime used to exit while the read was in flight.
+    let (out, err) = run_file(
+        "async_exit.js",
+        r#"fs.writeFileSync("exit.txt", "kept");
+           fs.readFile("exit.txt").then(b =>
+             console.log("resolved:", new TextDecoder().decode(b)));"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("resolved: kept"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_await_read_file() {
+    let (out, err) = run_file(
+        "async_await.js",
+        r#"fs.writeFileSync("await.txt", "awaited");
+           const b = await fs.readFile("await.txt");
+           console.log(new TextDecoder().decode(b));"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("awaited"));
+}
+
+#[test]
+fn test_concurrent_reads() {
+    let (out, err) = run_file(
+        "async_all.js",
+        r#"fs.writeFileSync("c.txt", "c");
+           const all = await Promise.all([
+             fs.readFile("c.txt"), fs.readFile("c.txt"), fs.readFile("c.txt"),
+           ]);
+           console.log("count:", all.length);"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("count: 3"));
+}
+
+#[test]
+fn test_read_file_rejects_for_missing_file() {
+    let (out, err) = run_file(
+        "async_missing.js",
+        r#"try { await fs.readFile("does_not_exist.txt"); }
+           catch (e) { console.log("caught:", e.name); }"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("caught: Error"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_async_read_enforces_sandbox() {
+    let (out, err) = run_file(
+        "async_sandbox.js",
+        r#"try { await fs.readFile("/etc/passwd"); console.log("LEAK"); }
+           catch (e) { console.log("blocked"); }"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("blocked"), "stdout was: {}", out);
+    assert!(!out.contains("LEAK"));
+}
+
+#[test]
+fn test_async_write_enforces_sandbox() {
+    let (out, err) = run_file(
+        "async_sandbox_w.js",
+        r#"try { await fs.writeFile("../escaped.txt", "x"); console.log("LEAK"); }
+           catch (e) { console.log("blocked"); }"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("blocked"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_unhandled_read_rejection_is_reported() {
+    let (_out, err, code) = run_file_status("async_unhandled.js", r#"fs.readFile("nope.txt");"#);
+    assert!(
+        err.contains("Unhandled promise rejection"),
+        "stderr was: {}",
+        err
+    );
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_write_file_returns_a_promise() {
+    let (out, err) = run_file(
+        "async_write.js",
+        r#"await fs.writeFile("aw.txt", "written");
+           console.log(new TextDecoder().decode(fs.readFileSync("aw.txt")));"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("written"));
+}
+
+#[test]
+fn test_sync_variants_still_work() {
+    let (out, err) = run_file(
+        "sync_variants.js",
+        r#"fs.writeFileSync("s.txt", "sync data");
+           console.log(new TextDecoder().decode(fs.readFileSync("s.txt")));"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("sync data"));
+}
+
+#[test]
+fn test_timers_still_run_after_awaited_io() {
+    let (out, err) = run_file(
+        "async_timer.js",
+        r#"fs.writeFileSync("t.txt", "t");
+           setTimeout(() => console.log("timer"), 1);
+           await fs.readFile("t.txt");
+           console.log("read");"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("timer"), "timer never fired: {}", out);
+    assert!(out.contains("read"));
 }

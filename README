@@ -52,9 +52,11 @@ Error reporting
 	1. See "Error reporting" below.
 
 Sandboxed fs
-	fs.readFile, fs.writeFile, fs.mkdirSync, fs.exists. All are scoped
-	to the script's directory. Path traversal, symlink escape, and
-	null bytes are blocked.
+	fs.readFile and fs.writeFile are async and return promises, backed
+	by Tokio. fs.readFileSync and fs.writeFileSync are the blocking
+	equivalents. Also fs.mkdirSync and fs.exists. All are scoped to the
+	script's directory. Path traversal, symlink escape, and null bytes
+	are blocked. See "Filesystem" below.
 
 Text encoding
 	TextEncoder and TextDecoder. UTF-8 only; other labels throw.
@@ -152,13 +154,16 @@ sets process.env.RAVEL_BUILD to "1", and skips the timer loop.
 
 	// build.js
 	if (ravel.build) {
-	  fs.writeFile("dist/index.html", "<h1>Built</h1>");
+	  fs.writeFileSync("dist/index.html", "<h1>Built</h1>");
 	}
 
-fs.writeFile takes a string. Bytes work too, for binary output:
+Build scripts run top to bottom, so the sync API is usually clearer. The
+async fs.writeFile works here too, with await.
 
-	fs.writeFile("dist/index.html",
-	             new TextEncoder().encode("<h1>Built</h1>"));
+Either one takes a string. Bytes work too, for binary output:
+
+	fs.writeFileSync("dist/index.html",
+	                 new TextEncoder().encode("<h1>Built</h1>"));
 
 Build scripts can use ESM imports, JSX, and fs.mkdirSync:
 
@@ -176,7 +181,7 @@ Build scripts can use ESM imports, JSX, and fs.mkdirSync:
 	import { Layout } from "./components.tsx";
 
 	fs.mkdirSync("dist/blog");
-	fs.writeFile(
+	fs.writeFileSync(
 	  "dist/index.html",
 	  "<!DOCTYPE html>" + <Layout title="Home"><h1>Welcome</h1></Layout>,
 	);
@@ -223,15 +228,42 @@ ravel.json in the project root sets defaults. CLI flags win.
 Filesystem
 ----------
 
-fs.writeFile creates parent directories:
+fs.readFile and fs.writeFile return promises. The work runs on Tokio, so
+the thread is free while the disk is busy:
+
+	const bytes = await fs.readFile("input.txt");
+	await fs.writeFile("output.txt", "done");
+
+Reads issued together run together:
+
+	const [a, b] = await Promise.all([
+	  fs.readFile("a.txt"),
+	  fs.readFile("b.txt"),
+	]);
+
+Errors arrive as a rejected promise, including sandbox denials:
+
+	try {
+	  await fs.readFile("/etc/passwd");
+	} catch (e) {
+	  console.log("blocked");
+	}
+
+fs.readFileSync and fs.writeFileSync block instead, and throw on error.
+Build scripts that read top to bottom are usually clearer with them.
+
+fs.writeFile and fs.writeFileSync create parent directories:
 
 	// creates dist/posts/hello/ too
-	fs.writeFile("dist/posts/hello/index.html", "<h1>Hello</h1>");
+	await fs.writeFile("dist/posts/hello/index.html", "<h1>Hello</h1>");
 
 fs.mkdirSync creates directories recursively, inside the sandbox:
 
 	fs.mkdirSync("dist/assets/css");
 	fs.mkdirSync("dist");             // no-op if it exists
+
+Known limitation: timers do not fire while an await on I/O is pending.
+They run once it settles. Fixing that is the "real event loop" item below.
 
 
 Globals
@@ -251,11 +283,6 @@ Roadmap
 -------
 
 The goal is learning, so this follows mechanisms, not features.
-
-Async I/O
-	Make fs return promises backed by Tokio, instead of blocking the
-	thread. A Rust future resolves a JavaScript promise. Every runtime
-	is built on this.
 
 A real event loop
 	Replace the 10ms polling loop. Sleep until the next timer deadline

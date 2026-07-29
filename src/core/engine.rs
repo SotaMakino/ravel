@@ -124,11 +124,16 @@ impl Engine {
         Ok(())
     }
 
-    /// Run queued microtasks (promise callbacks, `await` continuations) until
-    /// the queue is empty. Returns false if a job threw an uncaught error.
+    /// Run queued microtasks (promise callbacks, `await` continuations) and
+    /// wait for spawned futures (async fs) to finish. Returns false if a job
+    /// threw an uncaught error.
     ///
-    /// `AsyncRuntime::idle` would do this too, but it reports job errors with
-    /// `println!`, which would corrupt build output on stdout.
+    /// Two phases, because `execute_pending_job` cannot tell "queue empty"
+    /// from "futures still in flight" -- it returns `Ok(false)` for both. The
+    /// first phase drains ready jobs so their errors can be reported here
+    /// rather than by `idle`, which uses `println!` and would corrupt build
+    /// output on stdout. The second parks until the scheduler is empty, so a
+    /// pending read cannot be abandoned at exit.
     pub async fn run_pending_jobs(&self) -> bool {
         let mut ok = true;
         loop {
@@ -145,6 +150,7 @@ impl Engine {
                 }
             }
         }
+        self.runtime.idle().await;
         ok
     }
 

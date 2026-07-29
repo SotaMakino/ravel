@@ -9,6 +9,7 @@ Attempting to read /etc/passwd...
 Blocked /etc/passwd: permission denied
 Attempting to read ../Cargo.toml...
 Blocked ../Cargo.toml: permission denied
+Blocked /etc/passwd (sync): permission denied
 /etc/shadow exists: false
 ../.env exists: false
 Sandbox security tests passed!

@@ -1,8 +1,8 @@
-use rquickjs::{Ctx, Error, Object, Result, Value};
+use rquickjs::{Ctx, Error, Exception, Function, Object, Promise, Result, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::encoding::bytes_from_value;
+use crate::encoding::{bytes_from_value, to_uint8_array};
 
 fn resolve_path(root: &Path, input: &str) -> std::io::Result<PathBuf> {
     if input.contains('\0') {
@@ -74,24 +74,128 @@ fn resolve_path_for_write(root: &Path, input: &str) -> std::io::Result<PathBuf> 
     Ok(canon_resolved)
 }
 
+/// Hand a Rust outcome back to JavaScript by calling the promise's own
+/// resolve/reject functions. This is the seam between the two worlds: the
+/// Tokio task finishes, and settling the promise queues a microtask that the
+/// event loop drains.
+fn settle<'js>(
+    ctx: &Ctx<'js>,
+    resolve: Function<'js>,
+    reject: Function<'js>,
+    outcome: std::result::Result<Value<'js>, String>,
+) {
+    let called = match outcome {
+        Ok(value) => resolve.call::<_, ()>((value,)),
+        Err(message) => Exception::from_message(ctx.clone(), &message)
+            .and_then(|exception| reject.call::<_, ()>((exception,))),
+    };
+    if let Err(e) = called {
+        eprintln!("Failed to settle promise: {}", e);
+    }
+}
+
+/// Turn a JS value into the bytes to write. Runs before the write is
+/// scheduled, since it needs the JS value.
+fn write_payload(path: &str, data: &Value<'_>) -> std::result::Result<Vec<u8>, String> {
+    match data.as_string() {
+        Some(s) => s
+            .to_string()
+            .map(String::into_bytes)
+            .map_err(|e| format!("{}: '{}'", e, path)),
+        None => bytes_from_value(data)
+            .map_err(|_| format!("expected a string, Uint8Array, or ArrayBuffer: '{}'", path)),
+    }
+}
+
+async fn write_bytes(resolved: PathBuf, bytes: Vec<u8>) -> std::result::Result<(), String> {
+    if let Some(parent) = resolved.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("failed to create directories: {}: '{}'", e, parent.display()))?;
+    }
+    tokio::fs::write(&resolved, &bytes)
+        .await
+        .map_err(|e| format!("{}: '{}'", e, resolved.display()))
+}
+
 pub fn setup_fs<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
     let root1 = root.to_path_buf();
     let root2 = root.to_path_buf();
     let root3 = root.to_path_buf();
     let root4 = root.to_path_buf();
+    let root5 = root.to_path_buf();
+    let root6 = root.to_path_buf();
     let fs_obj = Object::new(ctx.clone())?;
 
+    // Async. Returns a promise; the read happens on Tokio, off this thread.
     fs_obj.set(
         "readFile",
+        rquickjs::function::Func::new(move |ctx: Ctx<'js>, path: String| -> Result<Promise<'js>> {
+            let (promise, resolve, reject) = Promise::new(&ctx)?;
+
+            // Check the sandbox now, not on the worker: a path that escapes
+            // the root must never reach the filesystem at all.
+            let resolved =
+                resolve_path(&root1, &path).map_err(|e| format!("{}: '{}'", e, path));
+
+            let task_ctx = ctx.clone();
+            ctx.spawn(async move {
+                let outcome = match resolved {
+                    Ok(resolved) => tokio::fs::read(&resolved)
+                        .await
+                        .map_err(|e| format!("{}: '{}'", e, resolved.display())),
+                    Err(message) => Err(message),
+                };
+                let outcome = outcome.and_then(|bytes| {
+                    to_uint8_array(&task_ctx, bytes).map_err(|e| e.to_string())
+                });
+                settle(&task_ctx, resolve, reject, outcome);
+            });
+
+            Ok(promise)
+        }),
+    )?;
+
+    fs_obj.set(
+        "writeFile",
+        rquickjs::function::Func::new(
+            move |ctx: Ctx<'js>, path: String, data: Value<'js>| -> Result<Promise<'js>> {
+                let (promise, resolve, reject) = Promise::new(&ctx)?;
+
+                let prepared = write_payload(&path, &data).and_then(|bytes| {
+                    resolve_path_for_write(&root2, &path)
+                        .map_err(|e| format!("{}: '{}'", e, path))
+                        .map(|resolved| (resolved, bytes))
+                });
+
+                let task_ctx = ctx.clone();
+                ctx.spawn(async move {
+                    let outcome = match prepared {
+                        Ok((resolved, bytes)) => write_bytes(resolved, bytes).await,
+                        Err(message) => Err(message),
+                    };
+                    settle(
+                        &task_ctx,
+                        resolve,
+                        reject,
+                        outcome.map(|()| Value::new_undefined(task_ctx.clone())),
+                    );
+                });
+
+                Ok(promise)
+            },
+        ),
+    )?;
+
+    // Sync equivalents, for build scripts that read top to bottom.
+    fs_obj.set(
+        "readFileSync",
         rquickjs::function::Func::new(move |ctx: Ctx<'js>, path: String| -> Result<Value<'js>> {
-            let resolved = resolve_path(&root1, &path).map_err(|e| {
+            let resolved = resolve_path(&root5, &path).map_err(|e| {
                 Error::new_from_js_message("string", "file", format!("{}: '{}'", e, path))
             })?;
             match fs::read(&resolved) {
-                Ok(bytes) => {
-                    let arr = rquickjs::ArrayBuffer::new(ctx.clone(), bytes)?;
-                    Ok(rquickjs::TypedArray::<u8>::from_arraybuffer(arr)?.into_value())
-                }
+                Ok(bytes) => to_uint8_array(&ctx, bytes),
                 Err(e) => Err(Error::new_from_js_message(
                     "string",
                     "file",
@@ -102,41 +206,26 @@ pub fn setup_fs<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
     )?;
 
     fs_obj.set(
-        "writeFile",
-        rquickjs::function::Func::new(
-            move |path: String, data: Value<'js>| -> Result<()> {
-                // Accept a string directly; bytes still work for binary output.
-                let bytes = match data.as_string() {
-                    Some(s) => s.to_string()?.into_bytes(),
-                    None => bytes_from_value(&data).map_err(|_| {
-                        Error::new_from_js_message(
-                            "file",
-                            "write",
-                            format!("expected a string, Uint8Array, or ArrayBuffer: '{}'", path),
-                        )
-                    })?,
-                };
-                let resolved = resolve_path_for_write(&root2, &path).map_err(|e| {
-                    Error::new_from_js_message("file", "write", format!("{}: '{}'", e, path))
-                })?;
-                if let Some(parent) = resolved.parent() {
-                    fs::create_dir_all(parent).map_err(|e| {
-                        Error::new_from_js_message(
-                            "file",
-                            "write",
-                            format!("failed to create directories: {}: '{}'", e, path),
-                        )
-                    })?;
-                }
-                fs::write(&resolved, &bytes).map_err(|e| {
+        "writeFileSync",
+        rquickjs::function::Func::new(move |path: String, data: Value<'js>| -> Result<()> {
+            let bytes = write_payload(&path, &data)
+                .map_err(|e| Error::new_from_js_message("file", "write", e))?;
+            let resolved = resolve_path_for_write(&root6, &path).map_err(|e| {
+                Error::new_from_js_message("file", "write", format!("{}: '{}'", e, path))
+            })?;
+            if let Some(parent) = resolved.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
                     Error::new_from_js_message(
                         "file",
                         "write",
-                        format!("{}: '{}'", e, resolved.display()),
+                        format!("failed to create directories: {}: '{}'", e, path),
                     )
-                })
-            },
-        ),
+                })?;
+            }
+            fs::write(&resolved, &bytes).map_err(|e| {
+                Error::new_from_js_message("file", "write", format!("{}: '{}'", e, resolved.display()))
+            })
+        }),
     )?;
 
     fs_obj.set(
@@ -364,6 +453,8 @@ mod tests {
             let fs_obj: rquickjs::Object = ctx.globals().get("fs").unwrap();
             assert!(fs_obj.get::<_, rquickjs::Function>("readFile").is_ok());
             assert!(fs_obj.get::<_, rquickjs::Function>("writeFile").is_ok());
+            assert!(fs_obj.get::<_, rquickjs::Function>("readFileSync").is_ok());
+            assert!(fs_obj.get::<_, rquickjs::Function>("writeFileSync").is_ok());
             assert!(fs_obj.get::<_, rquickjs::Function>("exists").is_ok());
             assert!(fs_obj.get::<_, rquickjs::Function>("mkdirSync").is_ok());
         });

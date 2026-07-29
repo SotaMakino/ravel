@@ -2,17 +2,16 @@ use rquickjs::{ArrayBuffer, Ctx, Error, Result, TypedArray, Value};
 
 /// Extract bytes from a `Uint8Array` or `ArrayBuffer`.
 pub fn bytes_from_value(value: &Value<'_>) -> Result<Vec<u8>> {
-    if let Ok(array) = TypedArray::<u8>::from_value(value.clone()) {
-        if let Some(bytes) = array.as_bytes() {
-            return Ok(bytes.to_vec());
-        }
+    if let Ok(array) = TypedArray::<u8>::from_value(value.clone())
+        && let Some(bytes) = array.as_bytes()
+    {
+        return Ok(bytes.to_vec());
     }
-    if let Some(object) = value.as_object() {
-        if let Some(buffer) = ArrayBuffer::from_object(object.clone()) {
-            if let Some(bytes) = buffer.as_bytes() {
-                return Ok(bytes.to_vec());
-            }
-        }
+    if let Some(object) = value.as_object()
+        && let Some(buffer) = ArrayBuffer::from_object(object.clone())
+        && let Some(bytes) = buffer.as_bytes()
+    {
+        return Ok(bytes.to_vec());
     }
     Err(Error::new_from_js_message(
         "value",
@@ -21,7 +20,7 @@ pub fn bytes_from_value(value: &Value<'_>) -> Result<Vec<u8>> {
     ))
 }
 
-fn to_uint8_array<'js>(ctx: &Ctx<'js>, bytes: Vec<u8>) -> Result<Value<'js>> {
+pub fn to_uint8_array<'js>(ctx: &Ctx<'js>, bytes: Vec<u8>) -> Result<Value<'js>> {
     let buffer = ArrayBuffer::new(ctx.clone(), bytes)?;
     Ok(TypedArray::<u8>::from_arraybuffer(buffer)?.into_value())
 }

@@ -18,11 +18,17 @@ try {
 }
 
 // fs.writeFile takes a string directly, or bytes for binary output.
-fs.writeFile("encoding-out.txt", "written from a string");
-console.log("string write:", decoder.decode(fs.readFile("encoding-out.txt")));
+await fs.writeFile("encoding-out.txt", "written from a string");
+console.log(
+  "string write:",
+  decoder.decode(await fs.readFile("encoding-out.txt")),
+);
 
-fs.writeFile("encoding-out.bin", encoder.encode("written from bytes"));
-console.log("bytes write:", decoder.decode(fs.readFile("encoding-out.bin")));
+await fs.writeFile("encoding-out.bin", encoder.encode("written from bytes"));
+console.log(
+  "bytes write:",
+  decoder.decode(await fs.readFile("encoding-out.bin")),
+);
 
 // console.log/info/debug go to stdout; warn/error go to stderr.
 console.info("info goes to stdout");
