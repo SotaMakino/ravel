@@ -17,7 +17,7 @@ pub fn repl() {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
-        let mut engine = Engine::new().await;
+        let engine = Engine::new().await;
 
         let cwd = std::env::current_dir().unwrap_or_default();
         let cwd_str = cwd.to_string_lossy().to_string();
@@ -52,8 +52,7 @@ pub fn repl() {
             })
             .await;
 
-            engine.run_pending_jobs().await;
-            engine.drain_timers().await;
+            engine.run_event_loop().await;
 
             // Report and reset per line: the REPL keeps going either way, and
             // one line's rejection must not be blamed on the next.

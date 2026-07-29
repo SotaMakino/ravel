@@ -1,9 +1,10 @@
 use rquickjs::{
     loader::{Loader, Resolver, ScriptLoader},
-    AsyncRuntime, Ctx, Error, Module, Result,
+    AsyncRuntime, Ctx, Error, Module, Promise, Result,
 };
 use std::path::{Path, PathBuf};
 
+use crate::error::{forget_rejection, report_uncaught};
 use crate::transpiler::{is_typescript_file, transpile_ts};
 
 pub async fn setup_module_loader(runtime: &AsyncRuntime, root: &Path) {
@@ -83,9 +84,42 @@ impl Resolver for ModuleResolver {
     }
 }
 
-pub async fn run_module<'js>(ctx: &Ctx<'js>, source: &str, filename: &str) -> Result<()> {
+/// Where the main module's promise is parked between [`start_module`] and
+/// [`finish_module`]. A `Promise<'js>` cannot outlive the context borrow, but a
+/// global can.
+const MAIN_MODULE_PROMISE: &str = "__ravel_main_module";
+
+/// Start the main module and return as soon as it hits its first `await`.
+///
+/// Deliberately not awaited here. Awaiting would pin the runtime inside this
+/// one call, and the event loop -- which is what makes timers fire and reads
+/// complete -- would not get to run until the module was already finished. So
+/// evaluation just starts the module; the loop drives the rest.
+pub fn start_module<'js>(ctx: &Ctx<'js>, source: &str, filename: &str) -> Result<()> {
     let promise = Module::evaluate(ctx.clone(), filename, source)?;
-    promise.into_future::<()>().await
+    ctx.globals().set(MAIN_MODULE_PROMISE, promise)
+}
+
+/// Report how the main module ended, once the loop has drained. Returns false
+/// if it threw.
+///
+/// A module still pending here was waiting on something that never settled.
+/// There is no work left to make it settle, so let it go quietly.
+pub fn finish_module(ctx: &Ctx<'_>) -> bool {
+    let Ok(promise) = ctx.globals().get::<_, Promise>(MAIN_MODULE_PROMISE) else {
+        return true;
+    };
+    // The rejection tracker has this promise down as unhandled. Claim it, so
+    // the failure is reported once, as an uncaught error rather than a stray
+    // rejection.
+    forget_rejection(&promise.clone().into_value());
+    match promise.result::<()>() {
+        Some(Err(e)) => {
+            report_uncaught(ctx, &e);
+            false
+        }
+        _ => true,
+    }
 }
 
 #[cfg(test)]

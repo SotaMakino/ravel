@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::core::{Engine, run_module, setup_module_loader};
+use crate::core::{Engine, finish_module, setup_module_loader, start_module};
 use crate::error::{report_pending_rejections, report_uncaught};
 
 use super::read_and_transpile;
@@ -18,7 +18,7 @@ pub fn run_source(source: &str, filename: &str) -> bool {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
-        let mut engine = Engine::new().await;
+        let engine = Engine::new().await;
 
         let abs_path = Path::new(filename)
             .canonicalize()
@@ -44,7 +44,9 @@ pub fn run_source(source: &str, filename: &str) -> bool {
                 ok = false;
             }
 
-            if let Err(e) = run_module(&ctx, source, &file_name).await {
+            // Starts the module and returns at its first `await`; the event
+            // loop below carries it the rest of the way.
+            if let Err(e) = start_module(&ctx, source, &file_name) {
                 report_uncaught(&ctx, &e);
                 ok = false;
             }
@@ -52,12 +54,15 @@ pub fn run_source(source: &str, filename: &str) -> bool {
         })
         .await;
 
-        // Settle promise callbacks queued by the module body before deciding
-        // whether a rejection went unhandled.
-        let jobs_ok = engine.run_pending_jobs().await;
-        let timers_ok = engine.drain_timers().await;
+        let loop_ok = engine.run_event_loop().await;
 
-        // Timer callbacks can reject too, so check after the event loop.
-        ok && jobs_ok && timers_ok && !report_pending_rejections()
+        // The loop has drained, so the module has settled if it ever will.
+        let module_ok = rquickjs::async_with!(engine.context => |ctx| {
+            finish_module(&ctx)
+        })
+        .await;
+
+        // Timer and I/O callbacks can reject too, so check after the loop.
+        ok && loop_ok && module_ok && !report_pending_rejections()
     })
 }

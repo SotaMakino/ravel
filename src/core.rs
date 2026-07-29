@@ -4,4 +4,4 @@ pub mod module;
 
 pub use engine::{Engine, RAVEL_VERSION};
 pub use event_loop::EventLoop;
-pub use module::{run_module, setup_module_loader};
+pub use module::{finish_module, setup_module_loader, start_module};

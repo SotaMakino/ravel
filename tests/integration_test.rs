@@ -1230,3 +1230,179 @@ fn test_timers_still_run_after_awaited_io() {
     assert!(out.contains("timer"), "timer never fired: {}", out);
     assert!(out.contains("read"));
 }
+
+// --- The event loop ---
+
+#[test]
+fn test_top_level_await_on_a_timer_resolves() {
+    // The module parks on a promise that only a timer can settle. Firing that
+    // timer is the loop's job, so this deadlocks unless the loop keeps running
+    // while the module is parked.
+    let (out, err, code) = run_file_status(
+        "loop_sleep.js",
+        r#"const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+           console.log("before");
+           await sleep(10);
+           console.log("after");"#,
+    );
+    assert_eq!(err, "");
+    let before = out.find("before").expect("missing before");
+    let after = out.find("after").expect("module never resumed");
+    assert!(before < after, "wrong order: {}", out);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn test_timers_fire_while_the_module_is_parked_on_an_await() {
+    let (out, err) = run_file(
+        "loop_parked.js",
+        r#"const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+           setTimeout(() => console.log("timer"), 20);
+           await sleep(60);
+           console.log("resumed");"#,
+    );
+    assert_eq!(err, "");
+    let timer = out.find("timer").expect("timer never fired");
+    let resumed = out.find("resumed").expect("module never resumed");
+    assert!(timer < resumed, "the timer waited for the module: {}", out);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_timers_fire_while_a_read_is_in_flight() {
+    // A FIFO gives a read that stays in flight for a known length of time,
+    // which a local file cannot. Timers must not wait for it.
+    let dir = std::env::temp_dir().join("ravel_test_loop_fifo");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("slow.pipe");
+    let made = Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .expect("failed to run mkfifo");
+    assert!(made.success(), "mkfifo failed");
+
+    let script = dir.join("fifo.js");
+    std::fs::write(
+        &script,
+        r#"setTimeout(() => console.log("timer"), 20);
+           const bytes = await fs.readFile("slow.pipe");
+           console.log("read:", new TextDecoder().decode(bytes));"#,
+    )
+    .unwrap();
+
+    // Opening the FIFO for writing blocks until the reader arrives, so hand
+    // the write to a helper and let the script get there on its own.
+    let writer = std::thread::spawn({
+        let fifo = fifo.clone();
+        move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::fs::write(&fifo, b"piped").unwrap();
+        }
+    });
+
+    let (out, err) = run_ravel(&[script.to_str().unwrap()]);
+    writer.join().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(err, "");
+    let timer = out.find("timer").expect("timer never fired");
+    let read = out.find("read: piped").expect("read never finished");
+    assert!(timer < read, "the timer waited for the read: {}", out);
+}
+
+#[test]
+fn test_timers_fire_in_deadline_order_not_registration_order() {
+    let (out, err) = run_file(
+        "loop_order.js",
+        r#"setTimeout(() => console.log("third"), 60);
+           setTimeout(() => console.log("first"), 20);
+           setTimeout(() => console.log("second"), 40);"#,
+    );
+    assert_eq!(err, "");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines, vec!["first", "second", "third"], "out was: {}", out);
+}
+
+#[test]
+fn test_equal_deadlines_fire_in_registration_order() {
+    let (out, err) = run_file(
+        "loop_ties.js",
+        r#"for (let i = 1; i <= 5; i++) setTimeout(() => console.log(i), 0);"#,
+    );
+    assert_eq!(err, "");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines, vec!["1", "2", "3", "4", "5"], "out was: {}", out);
+}
+
+#[test]
+fn test_microtasks_drain_between_timer_callbacks() {
+    let (out, err) = run_file(
+        "loop_micro.js",
+        r#"setTimeout(() => {
+             console.log("timer 1");
+             Promise.resolve().then(() => console.log("microtask"));
+           }, 10);
+           setTimeout(() => console.log("timer 2"), 30);"#,
+    );
+    assert_eq!(err, "");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines,
+        vec!["timer 1", "microtask", "timer 2"],
+        "out was: {}",
+        out
+    );
+}
+
+#[test]
+fn test_interval_survives_an_awaited_read_between_ticks() {
+    let (out, err) = run_file(
+        "loop_interval_io.js",
+        r#"fs.writeFileSync("i.txt", "x");
+           let ticks = 0;
+           await new Promise((resolve) => {
+             const id = setInterval(async () => {
+               await fs.readFile("i.txt");
+               ticks += 1;
+               console.log("tick", ticks);
+               if (ticks === 3) { clearInterval(id); resolve(); }
+             }, 10);
+           });
+           console.log("cleared");"#,
+    );
+    assert_eq!(err, "");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines,
+        vec!["tick 1", "tick 2", "tick 3", "cleared"],
+        "out was: {}",
+        out
+    );
+}
+
+#[test]
+fn test_timers_wake_on_their_deadline_not_on_a_tick() {
+    // Fifty 1ms timers, each scheduled by the one before it. The loop sleeps
+    // on each deadline in turn, so this costs about 50ms. A loop that instead
+    // woke every 10ms to check the clock would take ten times as long, which
+    // is the gap this threshold sits in.
+    let (out, err) = run_file(
+        "loop_chain.js",
+        r#"const t0 = Date.now();
+           let n = 0;
+           const step = () => {
+             n += 1;
+             if (n < 50) { setTimeout(step, 1); return; }
+             console.log(Date.now() - t0);
+           };
+           setTimeout(step, 1);"#,
+    );
+    assert_eq!(err, "");
+    let elapsed: u64 = out.trim().parse().unwrap_or_else(|_| panic!("out: {}", out));
+    assert!(
+        elapsed < 300,
+        "50 chained 1ms timers took {}ms; the loop is ticking, not sleeping on deadlines",
+        elapsed
+    );
+}

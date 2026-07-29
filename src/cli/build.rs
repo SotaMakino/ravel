@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::core::{Engine, run_module, setup_module_loader};
+use crate::core::{Engine, finish_module, setup_module_loader, start_module};
 use crate::error::{report_pending_rejections, report_uncaught};
 
 use super::read_and_transpile;
@@ -46,7 +46,7 @@ pub fn build_source(source: &str, filename: &str) -> bool {
                 ok = false;
             }
 
-            if let Err(e) = run_module(&ctx, source, &file_name).await {
+            if let Err(e) = start_module(&ctx, source, &file_name) {
                 report_uncaught(&ctx, &e);
                 ok = false;
             }
@@ -54,10 +54,16 @@ pub fn build_source(source: &str, filename: &str) -> bool {
         })
         .await;
 
-        // Build mode has no event loop, but promise callbacks still need to run.
-        let jobs_ok = engine.run_pending_jobs().await;
+        // A build script is a script like any other: it can await a read or
+        // set a timer, so it gets the same loop.
+        let loop_ok = engine.run_event_loop().await;
 
-        ok && jobs_ok && !report_pending_rejections()
+        let module_ok = rquickjs::async_with!(engine.context => |ctx| {
+            finish_module(&ctx)
+        })
+        .await;
+
+        ok && loop_ok && module_ok && !report_pending_rejections()
     });
 
     if script_dist != original_dir.join("dist") && script_dist.exists() {

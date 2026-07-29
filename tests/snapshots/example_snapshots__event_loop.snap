@@ -1,0 +1,19 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+~<N>ms  === a timer and a top-level await ===
+~<N>ms  await: slept 20ms
+~<N>ms  timer: 40ms, fired while the module was parked
+~<N>ms  await: slept another 40ms
+~<N>ms  === a read and a timer, issued together ===
+~<N>ms  read: back first, first line is "// The event loop: one loop, waiting on timers and I/O at the same time."
+~<N>ms  timer: 30ms deadline, reached second
+~<N>ms  === setInterval ===
+~<N>ms  interval: tick 1
+~<N>ms  interval: tick 2
+~<N>ms  interval: tick 3
+~<N>ms  done: nothing left to wait for, so the loop exits
+
+=== STDERR ===

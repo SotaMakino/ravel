@@ -1,24 +1,22 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
-use std::time::Duration;
 
 use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Object, Result};
-use tokio::sync::mpsc;
 
 use crate::console::setup_console;
+use crate::core::EventLoop;
 use crate::encoding::setup_encoding;
-use crate::error::{format_thrown, forget_rejection, report_uncaught, track_rejection};
+use crate::error::{forget_rejection, track_rejection};
 use crate::fs::setup_fs;
 use crate::jsx::setup_jsx_runtime;
-use crate::timer::{TimerMessage, TimerState, get_timer_state, set_timer_state, setup_timers};
+use crate::timer::{TimerState, set_timer_state, setup_timers};
 
 pub const RAVEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub struct Engine {
     pub runtime: AsyncRuntime,
     pub context: AsyncContext,
-    timer_rx: mpsc::UnboundedReceiver<TimerMessage>,
 }
 
 impl Engine {
@@ -38,13 +36,8 @@ impl Engine {
                 },
             )))
             .await;
-        let (timer_state, timer_rx) = TimerState::new();
-        set_timer_state(timer_state);
-        Self {
-            runtime,
-            context,
-            timer_rx,
-        }
+        set_timer_state(TimerState::new());
+        Self { runtime, context }
     }
 
     pub fn setup_all_apis<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
@@ -124,82 +117,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Run queued microtasks (promise callbacks, `await` continuations) and
-    /// wait for spawned futures (async fs) to finish. Returns false if a job
-    /// threw an uncaught error.
-    ///
-    /// Two phases, because `execute_pending_job` cannot tell "queue empty"
-    /// from "futures still in flight" -- it returns `Ok(false)` for both. The
-    /// first phase drains ready jobs so their errors can be reported here
-    /// rather than by `idle`, which uses `println!` and would corrupt build
-    /// output on stdout. The second parks until the scheduler is empty, so a
-    /// pending read cannot be abandoned at exit.
-    pub async fn run_pending_jobs(&self) -> bool {
-        let mut ok = true;
-        loop {
-            match self.runtime.execute_pending_job().await {
-                Ok(true) => continue,
-                Ok(false) => break,
-                Err(exception) => {
-                    ok = false;
-                    let ctx = exception.0.clone();
-                    rquickjs::async_with!(ctx => |ctx| {
-                        eprintln!("Uncaught {}", format_thrown(&ctx.catch()));
-                    })
-                    .await;
-                }
-            }
-        }
-        self.runtime.idle().await;
-        ok
-    }
-
-    /// Returns false if any timer callback threw an uncaught error.
-    pub async fn drain_timers(&mut self) -> bool {
-        let mut ok = true;
-        loop {
-            let fired = tokio::select! {
-                Some(msg) = self.timer_rx.recv() => Some(msg),
-                _ = tokio::time::sleep(Duration::from_millis(10)) => None,
-            };
-
-            let Some(msg) = fired else {
-                let has_pending = get_timer_state().is_some_and(|state| state.has_pending());
-                if !has_pending {
-                    break;
-                }
-                continue;
-            };
-
-            let ctx = self.context.clone();
-            ok &= rquickjs::async_with!(ctx => |ctx| {
-                let mut fired_ok = true;
-                match msg {
-                    TimerMessage::FireTimeout(id) => {
-                        if let Err(e) = ctx.eval::<(), _>(format!("__ravel_fire_timer({})", id)) {
-                            report_uncaught(&ctx, &e);
-                            fired_ok = false;
-                        }
-                        if let Some(state) = get_timer_state() {
-                            state.entries.lock().unwrap().remove(&id);
-                        }
-                    }
-                    TimerMessage::FireInterval(id) => {
-                        if let Err(e) = ctx.eval::<(), _>(format!("__ravel_fire_interval({})", id)) {
-                            report_uncaught(&ctx, &e);
-                            fired_ok = false;
-                        }
-                    }
-                }
-                fired_ok
-            })
-            .await;
-
-            // A timer callback can queue promise jobs; run them before the
-            // next tick so `await` inside a callback makes progress.
-            ok &= self.run_pending_jobs().await;
-        }
-        ok
+    /// Run the event loop until the script has nothing left to wait for.
+    /// Returns false if any job or timer callback threw an uncaught error.
+    pub async fn run_event_loop(&self) -> bool {
+        EventLoop::new(&self.runtime, &self.context).run().await
     }
 }
 

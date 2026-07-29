@@ -23,8 +23,10 @@ What
 QuickJS runs the JavaScript. Oxc strips TypeScript types and transforms
 JSX. Tokio drives timers and file I/O. Everything else is written here:
 
-  Event loop    setTimeout and setInterval on Tokio. Promise callbacks
-                and await continuations run before exit.
+  Event loop    One loop. Each turn drains microtasks, fires the timer
+                that is due, then sleeps until the next deadline or until
+                a read completes. It never polls, and it waits on timers
+                and I/O together, so neither one holds up the other.
 
   Async I/O     fs.readFile and fs.writeFile return promises. The read
                 happens on Tokio, so the thread is free while the disk is
@@ -63,22 +65,23 @@ The examples in examples/ cover each feature and run as-is.
 Known limits
 ------------
 
-Timers do not fire while an await on I/O is pending. They run once it
-settles. The event loop still runs in phases rather than as one loop.
-
 tokio::fs is a thread pool, not true async file I/O. Node does the same.
 Only io_uring really solves this.
 
 Bare imports do not search node_modules, and an extensionless import
 resolves to .js only, so ./foo never finds foo.ts.
 
+Delays under 1ms are rounded up to 1ms, as Node does. setTimeout(fn, 0)
+does not run fn on the next turn; it runs it a millisecond later.
+
+A top-level await on a promise that nothing can settle exits 0. Once the
+loop has no timers and no reads left, there is no work that could settle
+it, so ravel stops instead of reporting the stall.
+
 Roadmap
 -------
 
 Ordered by what each one teaches, not by usefulness.
-
-  A real event loop   One loop. Sleep until the next timer deadline or
-                      I/O completion, instead of polling every 10ms.
 
   Module resolution   node_modules lookup, package.json exports and
                       imports maps, conditional exports.
