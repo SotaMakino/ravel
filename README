@@ -2,21 +2,20 @@ ravel
 =====
 
 A toy JavaScript/TypeScript runtime written in Rust, built on QuickJS and
-Oxc. It exists to learn how runtimes like Node, Deno, and Bun work, not to
-be used for anything real.
+Oxc. It exists to learn how Node, Deno, and Bun work.
 
-Licensed under the MIT License. See LICENSE.
+MIT licensed. See LICENSE.
 
 
 Usage
 -----
 
 	ravel file.js           run JavaScript
-	ravel file.ts           run TypeScript (auto-transpiled via Oxc)
+	ravel file.ts           run TypeScript
 	ravel                   start the REPL
-	ravel --build file.js   SSG build mode (one-off, no timers)
+	ravel --build file.js   build mode (one-off, no timers)
 	ravel --serve           serve dist/ on port 3000
-	ravel --serve 8080      serve dist/ on a custom port
+	ravel --serve 8080      serve dist/ on another port
 	ravel --help
 	ravel --version
 
@@ -24,69 +23,60 @@ Usage
 Building
 --------
 
-	cargo build             debug build at target/debug/ravel
+	cargo build             build to target/debug/ravel
 	cargo install --path .  install `ravel` on your PATH
 	cargo test              run the tests
 
-`cargo build` only writes to target/debug/. Rerun `cargo install --path .`
-after changing the source, or the `ravel` on your PATH stays at the last
-installed version.
+`cargo build` only writes to target/debug/. Run `cargo install --path .`
+to update the `ravel` on your PATH.
 
 
 Features
 --------
 
 ES6+ via QuickJS
-	Promises, async/await, classes, modules, and so on.
+	Promises, async/await, classes, modules.
 
 TypeScript
-	.ts and .tsx files are stripped of types by Oxc and fed directly
-	into QuickJS.
+	Oxc strips types from .ts and .tsx files.
 
-JSX rendering
-	.tsx files transform JSX into note() calls that produce HTML
-	strings. See "JSX" below.
+JSX
+	.tsx files render JSX to HTML strings. See "JSX" below.
 
 Async runtime
-	setTimeout, setInterval, clearTimeout, clearInterval on a Tokio
-	event loop. Promise callbacks and await continuations are drained
-	before exit.
+	setTimeout, setInterval, clearTimeout, clearInterval on Tokio.
+	Promise callbacks and await continuations run before exit.
 
 Error reporting
-	Uncaught errors and unhandled promise rejections print name,
-	message, and stack to stderr, and exit with status 1. See "Error
-	reporting" below.
+	Uncaught errors and unhandled rejections print to stderr and exit
+	1. See "Error reporting" below.
 
 Sandboxed fs
-	fs.readFile, fs.writeFile (accepts a string or bytes, auto-creates
-	parent dirs), fs.mkdirSync, fs.exists, all scoped to the script's
-	directory. Path traversal, symlink escape, and null byte attacks
-	are blocked.
+	fs.readFile, fs.writeFile, fs.mkdirSync, fs.exists. All are scoped
+	to the script's directory. Path traversal, symlink escape, and
+	null bytes are blocked.
 
 Text encoding
-	TextEncoder and TextDecoder. UTF-8 only; other labels throw
-	RangeError rather than silently mis-decoding.
+	TextEncoder and TextDecoder. UTF-8 only; other labels throw.
 
 console
-	log, info, and debug go to stdout; warn and error go to stderr.
+	log, info, debug to stdout. warn, error to stderr.
 
 ESM imports
-	Relative and bare imports with .js, .mjs, .ts, .tsx resolution.
+	Relative and bare imports resolve .js, .mjs, .ts, .tsx.
 
 Globals
 	__filename, __dirname, process.env, process.argv, process.exit,
 	ravel.version, ravel.build.
 
 REPL
-	Line history with persistence, and timer support.
+	Line history, saved between sessions. Timers work.
 
-SSG build mode
-	--build runs a script as a one-off compilation task, with
-	ravel.build === true and process.env.RAVEL_BUILD === "1".
+Build mode
+	--build runs a script once, with ravel.build === true.
 
 Dev server
-	--serve serves the dist/ directory over HTTP (default port 3000).
-	--base strips a path prefix for subpath deployments.
+	--serve serves dist/ over HTTP. --base strips a path prefix.
 
 
 Project structure
@@ -95,11 +85,11 @@ Project structure
 	src/
 	  core.rs       module declarations for core/
 	  core/         QuickJS runtime, module loader, event loop
-	  transpiler.rs Oxc TypeScript-to-JavaScript transpiler (with JSX)
-	  jsx.rs        note() HTML renderer (Hono-style JSX runtime)
+	  transpiler.rs Oxc TypeScript and JSX transpiler
+	  jsx.rs        note() HTML renderer
 	  console.rs    console log/info/debug/warn/error
 	  encoding.rs   TextEncoder / TextDecoder
-	  error.rs      error formatting + unhandled rejection tracking
+	  error.rs      error formatting, unhandled rejections
 	  fs.rs         sandboxed filesystem
 	  timer.rs      setTimeout / setInterval
 	  config.rs     ravel.json config loader
@@ -112,9 +102,8 @@ Project structure
 Error reporting
 ---------------
 
-Uncaught errors print the error name, message, and a stack trace of user
-frames to stderr, and the process exits with status 1 so failures are
-visible in CI:
+Uncaught errors print the name, message, and user stack frames to stderr.
+The process exits 1, so CI sees the failure.
 
 	$ ravel err.js
 	Uncaught TypeError: cannot read property 'x' of null
@@ -124,21 +113,20 @@ visible in CI:
 	$ echo $?
 	1
 
-Promise rejections that are never handled are reported the same way:
+Unhandled promise rejections print the same way:
 
 	$ ravel rej.js
 	Unhandled promise rejection: Error: nope
 	    at <anonymous> (rej.js:1:19)
 
-A rejection that gets a handler -- including one attached in a later
-microtask, as await does -- is not reported. See examples/errors.js.
+A rejection with a handler is not reported. This includes handlers
+attached later, as await does. See examples/errors.js.
 
 
 JSX
 ---
 
-Write .tsx files with JSX syntax and they are transpiled and executed
-automatically:
+.tsx files are transpiled and run automatically:
 
 	// example.tsx
 	const el = <div class="card"><h1>Hello</h1></div>;
@@ -151,35 +139,28 @@ automatically:
 	console.log(<Badge text="New" />);
 	// <span class="badge">New</span>
 
-JSX is transformed using the classic runtime with note as the pragma
-function. note() is injected into the QuickJS global scope and renders JSX
-to HTML strings, supporting elements with attributes, nested children,
-self-closing void tags (<br>, <img>), fragments (<>...</>), function
-components with props, and attribute value escaping.
+Oxc transforms JSX into note() calls. note() renders to HTML strings. It
+supports attributes, nested children, void tags (<br>, <img>), fragments
+(<>...</>), function components, and attribute escaping.
 
 
-SSG build mode
---------------
+Build mode
+----------
 
-Use --build to run a script as a one-off static site generation task.
-Unlike normal execution, build mode sets ravel.build to true (vs false in
-normal and REPL mode), sets process.env.RAVEL_BUILD to "1", and skips the
-timer event loop.
+--build runs a script once as a build task. It sets ravel.build to true,
+sets process.env.RAVEL_BUILD to "1", and skips the timer loop.
 
 	// build.js
 	if (ravel.build) {
-	  console.log("Running in build mode");
 	  fs.writeFile("dist/index.html", "<h1>Built</h1>");
 	}
 
-fs.writeFile accepts a string directly. Bytes still work when you need
-binary output:
+fs.writeFile takes a string. Bytes work too, for binary output:
 
 	fs.writeFile("dist/index.html",
 	             new TextEncoder().encode("<h1>Built</h1>"));
 
-Build scripts can also use ESM imports, JSX components, and fs.mkdirSync
-for multi-page sites:
+Build scripts can use ESM imports, JSX, and fs.mkdirSync:
 
 	// components.tsx
 	export function Layout(props) {
@@ -204,32 +185,30 @@ Then:
 
 	ravel --build build.tsx
 
-See examples/site/ for a complete multi-page example.
+See examples/site/ for a full multi-page example.
 
 
 Dev server
 ----------
 
-Serve the output of --build over HTTP:
+--serve serves the output of --build:
 
-	ravel --serve               serve dist/ on port 3000
-	ravel --serve 8080         serve dist/ on port 8080
-	ravel --base /repo --serve strip the /repo prefix
+	ravel --serve               dist/ on port 3000
+	ravel --serve 8080          dist/ on port 8080
+	ravel --base /repo --serve  strip the /repo prefix
 
-The server looks for a dist/ directory in the current working directory
-and serves its contents. Unknown paths fall back to dist/index.html for
-SPA-style routing.
+It serves dist/ from the current directory. Unknown paths fall back to
+dist/index.html.
 
-Use --base when the site is deployed under a subpath, such as GitHub Pages
-at username.github.io/repo-name/. It strips the prefix from incoming
-requests so /repo-name/style.css resolves to dist/style.css.
+Use --base when the site lives under a subpath, such as GitHub Pages at
+username.github.io/repo-name/. It strips the prefix, so /repo-name/style.css
+resolves to dist/style.css.
 
 
 Configuration
 -------------
 
-Create a ravel.json file in the project root to set defaults. CLI flags
-override config values.
+ravel.json in the project root sets defaults. CLI flags win.
 
 	{
 	  "base": "/my-repo",
@@ -237,64 +216,59 @@ override config values.
 	}
 
 	Field  Type    Default  Description
-	base   string  ""       Base path prefix to strip when serving
-	port   number  3000     Port for the dev server
+	base   string  ""       Path prefix to strip when serving
+	port   number  3000     Dev server port
 
 
 Filesystem
 ----------
 
-fs.writeFile creates parent directories automatically, so nested static
-routes need no manual directory setup:
+fs.writeFile creates parent directories:
 
-	// creates dist/posts/hello/ along the way
+	// creates dist/posts/hello/ too
 	fs.writeFile("dist/posts/hello/index.html", "<h1>Hello</h1>");
 
-fs.mkdirSync(path) creates directories recursively within the sandbox:
+fs.mkdirSync creates directories recursively, inside the sandbox:
 
-	fs.mkdirSync("dist/assets/css");  // creates dist/assets/css
-	fs.mkdirSync("dist");             // no-op if it already exists
+	fs.mkdirSync("dist/assets/css");
+	fs.mkdirSync("dist");             // no-op if it exists
 
 
-Build metadata
---------------
+Globals
+-------
 
-These globals are available in all modes:
+Available in all modes:
 
-	ravel.version             current ravel version, e.g. "0.3.0"
-	ravel.build               true under --build, false otherwise
-	process.env               all environment variables
-	process.env.RAVEL_BUILD   "1" in build mode, undefined otherwise
+	ravel.version             version string, e.g. "0.3.0"
+	ravel.build               true under --build
+	process.env               environment variables
+	process.env.RAVEL_BUILD   "1" in build mode
 	process.argv              [execPath, scriptPath, ...userArgs]
-	process.exit(code)        exit immediately with a status code
-
-	console.log(ravel.version);     // "0.3.0"
-	console.log(process.env.HOME);  // "/Users/..."
+	process.exit(code)        exit with a status code
 
 
 Roadmap
 -------
 
-The goal is to learn how modern runtimes work, so the roadmap follows the
-mechanisms rather than the feature checklist.
+The goal is learning, so this follows mechanisms, not features.
 
 Async I/O
-	Make fs return real promises backed by Tokio instead of blocking
-	the thread, so a Rust future resolves a JavaScript promise. This
-	is the core mechanism every runtime is built on.
+	Make fs return promises backed by Tokio, instead of blocking the
+	thread. A Rust future resolves a JavaScript promise. Every runtime
+	is built on this.
 
 A real event loop
-	Replace the current 10ms polling loop with one that sleeps until
-	the next timer deadline or I/O completion.
+	Replace the 10ms polling loop. Sleep until the next timer deadline
+	or I/O completion.
 
 Module resolution
-	Implement the node_modules lookup, package.json exports/imports
-	maps, conditional exports, and self-referencing imports.
+	node_modules lookup, package.json exports and imports maps,
+	conditional exports, self-referencing imports.
 
 fetch and web standards
 	fetch, Request/Response, URL/URLSearchParams, crypto,
-	AbortController, ReadableStream/WritableStream, DOMException.
+	AbortController, streams.
 
 Multiple isolates
-	Move the process-global timer state into the engine so more than
-	one runtime can exist per process. Prerequisite for Workers.
+	Move the global timer state into the engine, so one process can
+	hold several runtimes. Needed for Workers.
