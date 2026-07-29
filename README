@@ -1,11 +1,46 @@
 ravel
 =====
 
-A toy JavaScript/TypeScript runtime written in Rust, built on QuickJS and
-Oxc. It exists to learn how Node, Deno, and Bun work.
+A toy JavaScript/TypeScript runtime written in Rust.
 
-MIT licensed. See LICENSE.
+Why
+---
 
+To learn how Node, Deno, and Bun actually work.
+
+Those runtimes are mostly not a JavaScript engine. V8 or JavaScriptCore
+does the language part. The runtime is everything around it: the event
+loop, non-blocking I/O, module resolution, and the web APIs the language
+itself does not define. That surrounding machinery is the interesting
+part, and the part you cannot see by reading JavaScript.
+
+So ravel embeds an engine and builds that machinery by hand. It is a
+learning project. Do not use it for anything real.
+
+What
+----
+
+QuickJS runs the JavaScript. Oxc strips TypeScript types and transforms
+JSX. Tokio drives timers and file I/O. Everything else is written here:
+
+  Event loop    setTimeout and setInterval on Tokio. Promise callbacks
+                and await continuations run before exit.
+
+  Async I/O     fs.readFile and fs.writeFile return promises. The read
+                happens on Tokio, so the thread is free while the disk is
+                busy. Reads issued together run together.
+
+  Sandbox       fs is scoped to the script's directory. Path traversal,
+                symlink escape, and null bytes are blocked.
+
+  Errors        Uncaught errors and unhandled rejections print name,
+                message, and stack to stderr, then exit 1.
+
+  TypeScript    .ts and .tsx run directly. No build step.
+
+  JSX           .tsx renders to HTML strings, for static sites.
+
+  Web APIs      TextEncoder, TextDecoder, console, process.
 
 Usage
 -----
@@ -13,15 +48,8 @@ Usage
 	ravel file.js           run JavaScript
 	ravel file.ts           run TypeScript
 	ravel                   start the REPL
-	ravel --build file.js   build mode (one-off, no timers)
-	ravel --serve           serve dist/ on port 3000
-	ravel --serve 8080      serve dist/ on another port
-	ravel --help
-	ravel --version
-
-
-Building
---------
+	ravel --build file.js   run once as a build task
+	ravel --serve           serve dist/ over HTTP
 
 	cargo build             build to target/debug/ravel
 	cargo install --path .  install `ravel` on your PATH
@@ -30,272 +58,39 @@ Building
 `cargo build` only writes to target/debug/. Run `cargo install --path .`
 to update the `ravel` on your PATH.
 
+The examples in examples/ cover each feature and run as-is.
 
-Features
---------
+Known limits
+------------
 
-ES6+ via QuickJS
-	Promises, async/await, classes, modules.
+Timers do not fire while an await on I/O is pending. They run once it
+settles. The event loop still runs in phases rather than as one loop.
 
-TypeScript
-	Oxc strips types from .ts and .tsx files.
+tokio::fs is a thread pool, not true async file I/O. Node does the same.
+Only io_uring really solves this.
 
-JSX
-	.tsx files render JSX to HTML strings. See "JSX" below.
-
-Async runtime
-	setTimeout, setInterval, clearTimeout, clearInterval on Tokio.
-	Promise callbacks and await continuations run before exit.
-
-Error reporting
-	Uncaught errors and unhandled rejections print to stderr and exit
-	1. See "Error reporting" below.
-
-Sandboxed fs
-	fs.readFile and fs.writeFile are async and return promises, backed
-	by Tokio. fs.readFileSync and fs.writeFileSync are the blocking
-	equivalents. Also fs.mkdirSync and fs.exists. All are scoped to the
-	script's directory. Path traversal, symlink escape, and null bytes
-	are blocked. See "Filesystem" below.
-
-Text encoding
-	TextEncoder and TextDecoder. UTF-8 only; other labels throw.
-
-console
-	log, info, debug to stdout. warn, error to stderr.
-
-ESM imports
-	Relative and bare imports resolve .js, .mjs, .ts, .tsx.
-
-Globals
-	__filename, __dirname, process.env, process.argv, process.exit,
-	ravel.version, ravel.build.
-
-REPL
-	Line history, saved between sessions. Timers work.
-
-Build mode
-	--build runs a script once, with ravel.build === true.
-
-Dev server
-	--serve serves dist/ over HTTP. --base strips a path prefix.
-
-
-Project structure
------------------
-
-	src/
-	  core.rs       module declarations for core/
-	  core/         QuickJS runtime, module loader, event loop
-	  transpiler.rs Oxc TypeScript and JSX transpiler
-	  jsx.rs        note() HTML renderer
-	  console.rs    console log/info/debug/warn/error
-	  encoding.rs   TextEncoder / TextDecoder
-	  error.rs      error formatting, unhandled rejections
-	  fs.rs         sandboxed filesystem
-	  timer.rs      setTimeout / setInterval
-	  config.rs     ravel.json config loader
-	  cli.rs        module declarations for cli/
-	  cli/          CLI entry point
-	examples/       usage demos
-	tests/          integration + snapshot tests
-
-
-Error reporting
----------------
-
-Uncaught errors print the name, message, and user stack frames to stderr.
-The process exits 1, so CI sees the failure.
-
-	$ ravel err.js
-	Uncaught TypeError: cannot read property 'x' of null
-	    at inner (err.js:1:18)
-	    at outer (err.js:2:19)
-	    at <anonymous> (err.js:3:1)
-	$ echo $?
-	1
-
-Unhandled promise rejections print the same way:
-
-	$ ravel rej.js
-	Unhandled promise rejection: Error: nope
-	    at <anonymous> (rej.js:1:19)
-
-A rejection with a handler is not reported. This includes handlers
-attached later, as await does. See examples/errors.js.
-
-
-JSX
----
-
-.tsx files are transpiled and run automatically:
-
-	// example.tsx
-	const el = <div class="card"><h1>Hello</h1></div>;
-	console.log(el);
-	// <div class="card"><h1>Hello</h1></div>
-
-	function Badge(props) {
-	  return <span class="badge">{props.text}</span>;
-	}
-	console.log(<Badge text="New" />);
-	// <span class="badge">New</span>
-
-Oxc transforms JSX into note() calls. note() renders to HTML strings. It
-supports attributes, nested children, void tags (<br>, <img>), fragments
-(<>...</>), function components, and attribute escaping.
-
-
-Build mode
-----------
-
---build runs a script once as a build task. It sets ravel.build to true,
-sets process.env.RAVEL_BUILD to "1", and skips the timer loop.
-
-	// build.js
-	if (ravel.build) {
-	  fs.writeFileSync("dist/index.html", "<h1>Built</h1>");
-	}
-
-Build scripts run top to bottom, so the sync API is usually clearer. The
-async fs.writeFile works here too, with await.
-
-Either one takes a string. Bytes work too, for binary output:
-
-	fs.writeFileSync("dist/index.html",
-	                 new TextEncoder().encode("<h1>Built</h1>"));
-
-Build scripts can use ESM imports, JSX, and fs.mkdirSync:
-
-	// components.tsx
-	export function Layout(props) {
-	  return (
-	    <html lang="en">
-	      <head><title>{props.title}</title></head>
-	      <body>{props.children}</body>
-	    </html>
-	  );
-	}
-
-	// build.tsx
-	import { Layout } from "./components.tsx";
-
-	fs.mkdirSync("dist/blog");
-	fs.writeFileSync(
-	  "dist/index.html",
-	  "<!DOCTYPE html>" + <Layout title="Home"><h1>Welcome</h1></Layout>,
-	);
-
-Then:
-
-	ravel --build build.tsx
-
-See examples/site/ for a full multi-page example.
-
-
-Dev server
-----------
-
---serve serves the output of --build:
-
-	ravel --serve               dist/ on port 3000
-	ravel --serve 8080          dist/ on port 8080
-	ravel --base /repo --serve  strip the /repo prefix
-
-It serves dist/ from the current directory. Unknown paths fall back to
-dist/index.html.
-
-Use --base when the site lives under a subpath, such as GitHub Pages at
-username.github.io/repo-name/. It strips the prefix, so /repo-name/style.css
-resolves to dist/style.css.
-
-
-Configuration
--------------
-
-ravel.json in the project root sets defaults. CLI flags win.
-
-	{
-	  "base": "/my-repo",
-	  "port": 8080
-	}
-
-	Field  Type    Default  Description
-	base   string  ""       Path prefix to strip when serving
-	port   number  3000     Dev server port
-
-
-Filesystem
-----------
-
-fs.readFile and fs.writeFile return promises. The work runs on Tokio, so
-the thread is free while the disk is busy:
-
-	const bytes = await fs.readFile("input.txt");
-	await fs.writeFile("output.txt", "done");
-
-Reads issued together run together:
-
-	const [a, b] = await Promise.all([
-	  fs.readFile("a.txt"),
-	  fs.readFile("b.txt"),
-	]);
-
-Errors arrive as a rejected promise, including sandbox denials:
-
-	try {
-	  await fs.readFile("/etc/passwd");
-	} catch (e) {
-	  console.log("blocked");
-	}
-
-fs.readFileSync and fs.writeFileSync block instead, and throw on error.
-Build scripts that read top to bottom are usually clearer with them.
-
-fs.writeFile and fs.writeFileSync create parent directories:
-
-	// creates dist/posts/hello/ too
-	await fs.writeFile("dist/posts/hello/index.html", "<h1>Hello</h1>");
-
-fs.mkdirSync creates directories recursively, inside the sandbox:
-
-	fs.mkdirSync("dist/assets/css");
-	fs.mkdirSync("dist");             // no-op if it exists
-
-Known limitation: timers do not fire while an await on I/O is pending.
-They run once it settles. Fixing that is the "real event loop" item below.
-
-
-Globals
--------
-
-Available in all modes:
-
-	ravel.version             version string, e.g. "0.3.0"
-	ravel.build               true under --build
-	process.env               environment variables
-	process.env.RAVEL_BUILD   "1" in build mode
-	process.argv              [execPath, scriptPath, ...userArgs]
-	process.exit(code)        exit with a status code
-
+Bare imports do not search node_modules, and an extensionless import
+resolves to .js only, so ./foo never finds foo.ts.
 
 Roadmap
 -------
 
-The goal is learning, so this follows mechanisms, not features.
+Ordered by what each one teaches, not by usefulness.
 
-A real event loop
-	Replace the 10ms polling loop. Sleep until the next timer deadline
-	or I/O completion.
+  A real event loop   One loop. Sleep until the next timer deadline or
+                      I/O completion, instead of polling every 10ms.
 
-Module resolution
-	node_modules lookup, package.json exports and imports maps,
-	conditional exports, self-referencing imports.
+  Module resolution   node_modules lookup, package.json exports and
+                      imports maps, conditional exports.
 
-fetch and web standards
-	fetch, Request/Response, URL/URLSearchParams, crypto,
-	AbortController, streams.
+  fetch and friends   fetch, Request/Response, URL, crypto,
+                      AbortController, streams.
 
-Multiple isolates
-	Move the global timer state into the engine, so one process can
-	hold several runtimes. Needed for Workers.
+  Multiple isolates   Move the process-global timer state into the
+                      engine, so one process can hold several runtimes.
+                      Needed for Workers.
+
+License
+-------
+
+MIT. See LICENSE.
