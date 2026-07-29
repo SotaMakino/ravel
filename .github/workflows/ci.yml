@@ -34,6 +34,12 @@ jobs:
   audit:
     runs-on: ubuntu-latest
 
+    # audit-check publishes results as a check run; the default GITHUB_TOKEN
+    # is read-only, which fails with "Resource not accessible by integration".
+    permissions:
+      contents: read
+      checks: write
+
     steps:
       # actions/checkout v6.0.2
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
