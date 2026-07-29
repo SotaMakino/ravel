@@ -11,12 +11,19 @@ pub struct Config {
 }
 
 impl Config {
+    /// Load `ravel.json` from the current working directory.
     pub fn load() -> Self {
-        let path = Path::new(CONFIG_FILE);
+        Self::load_from(Path::new("."))
+    }
+
+    /// Load `ravel.json` from `dir`. Taking the directory explicitly keeps
+    /// this testable without mutating the process-wide working directory.
+    pub fn load_from(dir: &Path) -> Self {
+        let path = dir.join(CONFIG_FILE);
         if !path.exists() {
             return Self::default();
         }
-        let content = match std::fs::read_to_string(path) {
+        let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Warning: Failed to read {}: {}", CONFIG_FILE, e);
@@ -57,76 +64,57 @@ mod tests {
     #[test]
     fn test_config_load_missing_file() {
         let dir = tempfile::tempdir().unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let config = Config::load();
+        let config = Config::load_from(dir.path());
         assert_eq!(config.base, "");
         assert_eq!(config.port, 3000);
-        std::env::set_current_dir(original).unwrap();
     }
 
     #[test]
     fn test_config_load_valid() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("ravel.json");
-        fs::write(&config_path, r#"{"base": "/my-repo", "port": 8080}"#).unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let config = Config::load();
+        fs::write(
+            dir.path().join("ravel.json"),
+            r#"{"base": "/my-repo", "port": 8080}"#,
+        )
+        .unwrap();
+        let config = Config::load_from(dir.path());
         assert_eq!(config.base, "/my-repo");
         assert_eq!(config.port, 8080);
-        std::env::set_current_dir(original).unwrap();
     }
 
     #[test]
     fn test_config_load_partial() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("ravel.json");
-        fs::write(&config_path, r#"{"base": "/app"}"#).unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let config = Config::load();
+        fs::write(dir.path().join("ravel.json"), r#"{"base": "/app"}"#).unwrap();
+        let config = Config::load_from(dir.path());
         assert_eq!(config.base, "/app");
         assert_eq!(config.port, 3000);
-        std::env::set_current_dir(original).unwrap();
     }
 
     #[test]
     fn test_config_load_port_only() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("ravel.json");
-        fs::write(&config_path, r#"{"port": 5000}"#).unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let config = Config::load();
+        fs::write(dir.path().join("ravel.json"), r#"{"port": 5000}"#).unwrap();
+        let config = Config::load_from(dir.path());
         assert_eq!(config.base, "");
         assert_eq!(config.port, 5000);
-        std::env::set_current_dir(original).unwrap();
     }
 
     #[test]
     fn test_config_load_invalid_json() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("ravel.json");
-        fs::write(&config_path, r#"{invalid}"#).unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let config = Config::load();
+        fs::write(dir.path().join("ravel.json"), r#"{invalid}"#).unwrap();
+        let config = Config::load_from(dir.path());
         assert_eq!(config.base, "");
         assert_eq!(config.port, 3000);
-        std::env::set_current_dir(original).unwrap();
     }
 
     #[test]
     fn test_config_load_empty_object() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("ravel.json");
-        fs::write(&config_path, "{}").unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let config = Config::load();
+        fs::write(dir.path().join("ravel.json"), "{}").unwrap();
+        let config = Config::load_from(dir.path());
         assert_eq!(config.base, "");
         assert_eq!(config.port, 3000);
-        std::env::set_current_dir(original).unwrap();
     }
 }
