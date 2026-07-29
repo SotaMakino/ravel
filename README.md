@@ -18,8 +18,13 @@ ravel --version
 ## Building
 
 ```bash
-cargo build
+cargo build              # debug build at target/debug/ravel
+cargo install --path .   # install `ravel` on your PATH
 ```
+
+`cargo build` only writes to `target/debug/`. Rerun `cargo install --path .`
+after changing the source, or the `ravel` on your PATH stays at the last
+installed version.
 
 ## Tests
 
