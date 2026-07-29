@@ -88,7 +88,9 @@ Ordered by what each one teaches, not by usefulness.
 
   Multiple isolates   Move the process-global timer state into the
                       engine, so one process can hold several runtimes.
-                      Needed for Workers.
+                      Needed for Workers. rquickjs has userdata storage
+                      (Ctx::store_userdata) that can hold per-runtime
+                      state, which looks like the way in.
 
 License
 -------
