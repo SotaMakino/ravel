@@ -2,6 +2,8 @@ use rquickjs::{Ctx, Error, Object, Result, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::encoding::bytes_from_value;
+
 fn resolve_path(root: &Path, input: &str) -> std::io::Result<PathBuf> {
     if input.contains('\0') {
         return Err(std::io::Error::new(
@@ -102,7 +104,18 @@ pub fn setup_fs<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
     fs_obj.set(
         "writeFile",
         rquickjs::function::Func::new(
-            move |path: String, data: rquickjs::TypedArray<u8>| -> Result<()> {
+            move |path: String, data: Value<'js>| -> Result<()> {
+                // Accept a string directly; bytes still work for binary output.
+                let bytes = match data.as_string() {
+                    Some(s) => s.to_string()?.into_bytes(),
+                    None => bytes_from_value(&data).map_err(|_| {
+                        Error::new_from_js_message(
+                            "file",
+                            "write",
+                            format!("expected a string, Uint8Array, or ArrayBuffer: '{}'", path),
+                        )
+                    })?,
+                };
                 let resolved = resolve_path_for_write(&root2, &path).map_err(|e| {
                     Error::new_from_js_message("file", "write", format!("{}: '{}'", e, path))
                 })?;
@@ -115,7 +128,7 @@ pub fn setup_fs<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
                         )
                     })?;
                 }
-                fs::write(&resolved, data.as_bytes().unwrap()).map_err(|e| {
+                fs::write(&resolved, &bytes).map_err(|e| {
                     Error::new_from_js_message(
                         "file",
                         "write",

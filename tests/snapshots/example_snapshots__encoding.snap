@@ -1,0 +1,21 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+encoding: utf-8
+ascii bytes: 3
+multibyte bytes: 6
+round trip: héllo 世界
+rejected encoding: RangeError
+string write: written from a string
+bytes write: written from bytes
+info goes to stdout
+debug goes to stdout
+argv entries: true
+script is argv[1]: true
+done
+
+=== STDERR ===
+warn goes to stderr
+error goes to stderr

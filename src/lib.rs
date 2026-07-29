@@ -1,5 +1,6 @@
 pub mod console;
 pub mod core;
+pub mod encoding;
 pub mod error;
 pub mod fs;
 pub mod timer;

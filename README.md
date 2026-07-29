@@ -39,9 +39,11 @@ cargo test
 - **JSX rendering** — `.tsx` files transform JSX into `note()` calls that produce HTML strings
 - **Async runtime** — `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` on a Tokio event loop; promise callbacks and `await` continuations are drained before exit
 - **Error reporting** — uncaught errors and unhandled promise rejections print name, message, and stack to stderr, and exit with status 1
-- **Sandboxed fs** — `fs.readFile`, `fs.writeFile` (auto-creates parent dirs), `fs.mkdirSync`, `fs.exists` scoped to the script's directory; path traversal, symlink escape, and null byte attacks are blocked
+- **Sandboxed fs** — `fs.readFile`, `fs.writeFile` (accepts a string or bytes, auto-creates parent dirs), `fs.mkdirSync`, `fs.exists` scoped to the script's directory; path traversal, symlink escape, and null byte attacks are blocked
+- **Text encoding** — `TextEncoder` / `TextDecoder` (UTF-8 only; other labels throw)
+- **console** — `log`, `info`, `debug` to stdout; `warn`, `error` to stderr
 - **ESM imports** — relative and bare imports with `.js`, `.mjs`, `.ts`, `.tsx` resolution
-- **Globals** — `__filename`, `__dirname`, `process.env`, `ravel.version`, `ravel.build`
+- **Globals** — `__filename`, `__dirname`, `process.env`, `process.argv`, `process.exit`, `ravel.version`, `ravel.build`
 - **REPL** — line history with persistence, timer support
 - **SSG build mode** — `--build` flag runs scripts as one-off compilation tasks with `ravel.build === true` and `process.env.RAVEL_BUILD === "1"`
 - **Dev server** — `--serve` flag serves the `dist/` directory over HTTP (default port 3000, configurable); `--base` strips a path prefix for subpath deployments
@@ -54,7 +56,8 @@ src/
   core/         — QuickJS runtime, module loader, event loop
   transpiler.rs — Oxc TypeScript-to-JavaScript transpiler (with JSX support)
   jsx.rs        — note() HTML renderer (Hono-style JSX runtime)
-  console.rs    — console.log
+  console.rs    — console log/info/debug/warn/error
+  encoding.rs   — TextEncoder / TextDecoder
   error.rs      — error formatting + unhandled rejection tracking
   fs.rs         — sandboxed filesystem
   timer.rs      — setTimeout / setInterval
@@ -128,8 +131,15 @@ Use `--build` to run a script as a one-off static site generation task. Unlike n
 // build.js
 if (ravel.build) {
   console.log("Running in build mode");
-  fs.writeFile("dist/index.html", new TextEncoder().encode("<h1>Built</h1>"));
+  fs.writeFile("dist/index.html", "<h1>Built</h1>");
 }
+```
+
+`fs.writeFile` accepts a string directly. Bytes still work when you need
+binary output:
+
+```js
+fs.writeFile("dist/index.html", new TextEncoder().encode("<h1>Built</h1>"));
 ```
 
 Build scripts can also use ESM imports, JSX components, and `fs.mkdirSync` for multi-page sites:

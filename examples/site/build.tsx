@@ -1,16 +1,8 @@
 import { Layout } from "./components.tsx";
 import { PostCard } from "./components.tsx";
 
-function toBytes(str: string): Uint8Array {
-  var bytes = new Uint8Array(str.length);
-  for (var i = 0; i < str.length; i++) {
-    bytes[i] = str.charCodeAt(i);
-  }
-  return bytes;
-}
-
 function writePage(path: string, html: string) {
-  fs.writeFile(path, toBytes("<!DOCTYPE html>" + html));
+  fs.writeFile(path, "<!DOCTYPE html>" + html);
   console.log("wrote " + path);
 }
 
@@ -48,7 +40,7 @@ if (!ravel.build) {
     "article { margin-bottom: 1.5rem; }",
     "h1 { margin-bottom: 0.5rem; }",
   ].join("\n");
-  fs.writeFile("dist/style.css", toBytes(css));
+  fs.writeFile("dist/style.css", css);
   console.log("wrote dist/style.css");
 
   // Home page

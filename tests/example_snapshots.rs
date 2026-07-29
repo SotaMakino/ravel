@@ -83,6 +83,15 @@ fn test_example_jsx() {
 }
 
 #[test]
+fn test_example_encoding() {
+    let (out, err) = run_ravel(&["examples/encoding.js"]);
+    let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
+    insta::assert_snapshot!("encoding", output);
+    let _ = std::fs::remove_file("examples/encoding-out.txt");
+    let _ = std::fs::remove_file("examples/encoding-out.bin");
+}
+
+#[test]
 fn test_example_errors() {
     let (out, err) = run_ravel(&["examples/errors.js"]);
     let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);

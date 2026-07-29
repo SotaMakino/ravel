@@ -917,3 +917,167 @@ fn test_awaited_rejection_can_be_caught() {
     assert_eq!(err, "");
     assert_eq!(code, 0);
 }
+
+// --- TextEncoder / TextDecoder ---
+
+#[test]
+fn test_text_encoder_encodes_utf8() {
+    let (out, err) = run_file(
+        "enc.js",
+        "console.log(new TextEncoder().encode('abc').length);",
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("3"));
+}
+
+#[test]
+fn test_text_encoder_counts_multibyte_as_bytes() {
+    let (out, err) = run_file(
+        "enc_multi.js",
+        "console.log(new TextEncoder().encode('日本').length);",
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("6"));
+}
+
+#[test]
+fn test_text_decoder_round_trip() {
+    let (out, err) = run_file(
+        "dec.js",
+        "console.log(new TextDecoder().decode(new TextEncoder().encode('héllo 世界')));",
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("héllo 世界"));
+}
+
+#[test]
+fn test_text_decoder_rejects_unsupported_encoding() {
+    let (_out, err, code) = run_file_status("dec_bad.js", "new TextDecoder('latin1');");
+    assert!(err.contains("RangeError"), "stderr was: {}", err);
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_readme_ssg_example_runs() {
+    // The README's build-mode example, which used to throw on TextEncoder.
+    let dir = std::env::temp_dir().join("ravel_test_readme_ssg");
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("build.js");
+    std::fs::write(
+        &script,
+        r#"fs.writeFile("dist/index.html", new TextEncoder().encode("<h1>Built</h1>"));"#,
+    )
+    .unwrap();
+    let (_out, err, code) = run_ravel_status(&["--build", script.to_str().unwrap()]);
+    assert_eq!(err, "");
+    assert_eq!(code, 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all("dist");
+}
+
+// --- fs.writeFile string support ---
+
+#[test]
+fn test_write_file_accepts_string() {
+    let (out, err) = run_file(
+        "write_str.js",
+        r#"fs.writeFile("ws.txt", "plain string");
+           console.log(new TextDecoder().decode(fs.readFile("ws.txt")));"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("plain string"));
+}
+
+#[test]
+fn test_write_file_still_accepts_bytes() {
+    let (out, err) = run_file(
+        "write_bytes.js",
+        r#"fs.writeFile("wb.txt", new TextEncoder().encode("from bytes"));
+           console.log(new TextDecoder().decode(fs.readFile("wb.txt")));"#,
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("from bytes"));
+}
+
+#[test]
+fn test_write_file_rejects_other_types() {
+    let (_out, err, code) = run_file_status("write_bad.js", r#"fs.writeFile("bad.txt", {});"#);
+    assert!(err.contains("Uncaught"), "stderr was: {}", err);
+    assert_eq!(code, 1);
+}
+
+// --- console streams ---
+
+#[test]
+fn test_console_error_goes_to_stderr() {
+    let (out, err) = run_file("con_err.js", "console.error('to stderr');");
+    assert!(err.contains("to stderr"), "stderr was: {}", err);
+    assert!(!out.contains("to stderr"), "leaked to stdout: {}", out);
+}
+
+#[test]
+fn test_console_warn_goes_to_stderr() {
+    let (out, err) = run_file("con_warn.js", "console.warn('warned');");
+    assert!(err.contains("warned"), "stderr was: {}", err);
+    assert!(!out.contains("warned"));
+}
+
+#[test]
+fn test_console_info_and_debug_go_to_stdout() {
+    let (out, err) = run_file("con_info.js", "console.info('i');\nconsole.debug('d');");
+    assert_eq!(err, "");
+    assert!(out.contains("i") && out.contains("d"));
+}
+
+// --- process globals ---
+
+#[test]
+fn test_process_argv_includes_script_path() {
+    let (out, err) = run_file(
+        "argv.js",
+        "console.log(process.argv[1].endsWith('argv.js'));",
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("true"));
+}
+
+#[test]
+fn test_process_argv_passes_user_args() {
+    let tmp = std::env::temp_dir().join("argv_user.js");
+    std::fs::write(&tmp, "console.log(process.argv.slice(2).join(','));").unwrap();
+    let (out, err) = run_ravel(&[tmp.to_str().unwrap(), "alpha", "beta"]);
+    let _ = std::fs::remove_file(&tmp);
+    assert_eq!(err, "");
+    assert!(out.contains("alpha,beta"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_process_exit_sets_status_code() {
+    let (out, _err, code) = run_file_status(
+        "exit.js",
+        "console.log('before');\nprocess.exit(3);\nconsole.log('never');",
+    );
+    assert!(out.contains("before"));
+    assert!(!out.contains("never"));
+    assert_eq!(code, 3);
+}
+
+#[test]
+fn test_process_exit_defaults_to_zero() {
+    let (_out, _err, code) = run_file_status("exit0.js", "process.exit();");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn test_process_env_survives_quotes_in_values() {
+    let tmp = std::env::temp_dir().join("env_quote.js");
+    std::fs::write(&tmp, "console.log(process.env.RAVEL_TEST_VAR);").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .arg(tmp.to_str().unwrap())
+        .env("RAVEL_TEST_VAR", r#"has "quotes" and \backslash"#)
+        .output()
+        .expect("Failed to execute ravel");
+    let _ = std::fs::remove_file(&tmp);
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(out.contains(r#"has "quotes" and \backslash"#), "stdout was: {}", out);
+}

@@ -24,16 +24,39 @@ pub fn value_to_string(v: &Value<'_>) -> String {
     }
 }
 
+fn format_args(args: &Rest<Value<'_>>) -> String {
+    args.0
+        .iter()
+        .map(value_to_string)
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
 pub fn setup_console<'js>(ctx: &Ctx<'js>) -> Result<()> {
     let console = rquickjs::Object::new(ctx.clone())?;
-    console.set(
-        "log",
-        rquickjs::function::Func::new(|args: Rest<Value<'_>>| -> rquickjs::Result<()> {
-            let parts: Vec<String> = args.0.iter().map(|v| value_to_string(v)).collect();
-            println!("{}", parts.join(" "));
-            Ok(())
-        }),
-    )?;
+
+    // log/info/debug go to stdout; warn/error go to stderr, so a script's
+    // diagnostics stay separate from its output when piped.
+    for name in ["log", "info", "debug"] {
+        console.set(
+            name,
+            rquickjs::function::Func::new(|args: Rest<Value<'_>>| -> rquickjs::Result<()> {
+                println!("{}", format_args(&args));
+                Ok(())
+            }),
+        )?;
+    }
+
+    for name in ["warn", "error"] {
+        console.set(
+            name,
+            rquickjs::function::Func::new(|args: Rest<Value<'_>>| -> rquickjs::Result<()> {
+                eprintln!("{}", format_args(&args));
+                Ok(())
+            }),
+        )?;
+    }
+
     ctx.globals().set("console", console)?;
     Ok(())
 }

@@ -1,11 +1,13 @@
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
-use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Result};
+use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Object, Result};
 use tokio::sync::mpsc;
 
 use crate::console::setup_console;
+use crate::encoding::setup_encoding;
 use crate::error::{format_thrown, forget_rejection, report_uncaught, track_rejection};
 use crate::fs::setup_fs;
 use crate::jsx::setup_jsx_runtime;
@@ -47,10 +49,35 @@ impl Engine {
 
     pub fn setup_all_apis<'js>(ctx: &Ctx<'js>, root: &Path) -> Result<()> {
         setup_console(ctx)?;
+        setup_encoding(ctx)?;
         setup_timers(ctx)?;
         setup_fs(ctx, root)?;
         setup_jsx_runtime(ctx)?;
         Ok(())
+    }
+
+    /// `[execPath, scriptPath, ...userArgs]`, matching Node's shape. Args that
+    /// belong to ravel itself (flags, the script path) are not passed through.
+    /// In the REPL there is no script, so only the exec path is present.
+    fn build_argv(file: &str) -> Vec<String> {
+        let raw: Vec<String> = std::env::args().collect();
+        let mut argv: Vec<String> = raw.first().cloned().into_iter().collect();
+
+        if file.is_empty() {
+            return argv;
+        }
+        argv.push(file.to_string());
+
+        // Locate the script in the real args so anything after it is a user arg.
+        let script_idx = raw.iter().position(|arg| {
+            Path::new(arg)
+                .canonicalize()
+                .is_ok_and(|p| p.to_string_lossy() == file)
+        });
+        if let Some(idx) = script_idx {
+            argv.extend(raw.iter().skip(idx + 1).cloned());
+        }
+        argv
     }
 
     pub fn inject_globals<'js>(
@@ -67,14 +94,27 @@ impl Engine {
             env_vars.insert("RAVEL_BUILD".to_string(), "1".to_string());
         }
 
-        let mut env_parts = Vec::new();
-        for (k, v) in &env_vars {
-            let escaped_k = k.replace('\\', "\\\\").replace('"', "\\\"");
-            let escaped_v = v.replace('\\', "\\\\").replace('"', "\\\"");
-            env_parts.push(format!("\"{}\":\"{}\"", escaped_k, escaped_v));
+        // Built through the object API rather than eval'd JSON so values
+        // containing quotes or backslashes cannot break out.
+        let process = Object::new(ctx.clone())?;
+
+        let env = Object::new(ctx.clone())?;
+        for (k, v) in env_vars {
+            env.set(k, v)?;
         }
-        let env_json = format!("{{{}}}", env_parts.join(","));
-        let _: Result<()> = ctx.eval(format!("var process = {{ env: {} }};", env_json));
+        process.set("env", env)?;
+        process.set("argv", Self::build_argv(file))?;
+        process.set(
+            "exit",
+            // Opt, not Option: Option requires the argument to be present.
+            rquickjs::function::Func::new(|code: rquickjs::function::Opt<i32>| -> () {
+                // println! is line-buffered, but flush anyway since
+                // process::exit skips destructors.
+                let _ = std::io::stdout().flush();
+                std::process::exit(code.0.unwrap_or(0));
+            }),
+        )?;
+        ctx.globals().set("process", process)?;
 
         let _: Result<()> = ctx.eval(format!(
             "var ravel = {{ version: {:?}, build: {} }};",

@@ -1,3 +1,4 @@
 /target
 examples/*/dist
 /dist
+examples/encoding-out.*
