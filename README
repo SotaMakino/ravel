@@ -1,0 +1,18 @@
+ravel
+=====
+
+A toy JavaScript/TypeScript runtime written in Rust, built on QuickJS and
+Oxc. It exists to learn how runtimes like Node, Deno, and Bun work, not to
+be used for anything real.
+
+	cargo build              # build
+	cargo install --path .   # install `ravel` on your PATH
+	cargo test               # run the tests
+
+	ravel file.js            # run a script
+	ravel                    # start the REPL
+
+See docs/manual.md for the full command list, the JSX renderer, build mode,
+and the error reporting rules. Runnable demos live in examples/.
+
+Licensed under the MIT License. See LICENSE.

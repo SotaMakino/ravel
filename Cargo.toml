@@ -2,6 +2,8 @@
 name = "ravel"
 version = "0.3.0"
 edition = "2024"
+license = "MIT"
+description = "A toy JavaScript/TypeScript runtime written in Rust"
 
 [dependencies]
 rquickjs = { version = "0.11", features = ["futures", "macro", "loader"] }

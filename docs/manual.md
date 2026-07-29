@@ -1,6 +1,7 @@
-# ravel
+# ravel manual
 
-A toy JavaScript/TypeScript runtime written in Rust.
+A toy JavaScript/TypeScript runtime written in Rust. See the top-level
+README for a short introduction.
 
 ## Usage
 
