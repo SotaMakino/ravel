@@ -7,7 +7,7 @@
 - **Examples:** Create a new `examples/*.js` file for any new functionality.
 - **Snapshot Testing:** Generate/update snapshot tests whenever a new example is added.
 - **Integration:** Update `tests/integration_test.rs` to reflect system-wide changes.
-- **Documentation:** Always update `README.md` to match the current status after tests pass.
+- **Documentation:** Always update `README` to match the current status after tests pass.
 
 ## Testing Standards
 
@@ -18,5 +18,5 @@
 ## Constraints
 
 - No feature additions without accompanying tests.
-- No drift between implementation and `README.md`.
+- No drift between implementation and `README`.
 - Prioritize Safe Rust when interacting with the rquickjs engine.
