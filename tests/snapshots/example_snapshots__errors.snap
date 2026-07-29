@@ -1,0 +1,14 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+caught: TypeError: cannot read property 'x' of null
+has stack: true
+microtask: resolved
+handled rejection: handled
+after await
+caught awaited rejection: awaited
+timer ran
+
+=== STDERR ===

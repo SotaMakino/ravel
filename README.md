@@ -32,7 +32,8 @@ cargo test
 - **ES6+** via QuickJS — promises, async/await, classes, modules, etc.
 - **TypeScript** — `.ts`/`.tsx` files are stripped of types by Oxc and fed directly into QuickJS
 - **JSX rendering** — `.tsx` files transform JSX into `note()` calls that produce HTML strings
-- **Async runtime** — `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` on a Tokio event loop
+- **Async runtime** — `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` on a Tokio event loop; promise callbacks and `await` continuations are drained before exit
+- **Error reporting** — uncaught errors and unhandled promise rejections print name, message, and stack to stderr, and exit with status 1
 - **Sandboxed fs** — `fs.readFile`, `fs.writeFile` (auto-creates parent dirs), `fs.mkdirSync`, `fs.exists` scoped to the script's directory; path traversal, symlink escape, and null byte attacks are blocked
 - **ESM imports** — relative and bare imports with `.js`, `.mjs`, `.ts`, `.tsx` resolution
 - **Globals** — `__filename`, `__dirname`, `process.env`, `ravel.version`, `ravel.build`
@@ -49,6 +50,7 @@ src/
   transpiler.rs — Oxc TypeScript-to-JavaScript transpiler (with JSX support)
   jsx.rs        — note() HTML renderer (Hono-style JSX runtime)
   console.rs    — console.log
+  error.rs      — error formatting + unhandled rejection tracking
   fs.rs         — sandboxed filesystem
   timer.rs      — setTimeout / setInterval
   config.rs     — ravel.json config loader
@@ -57,6 +59,32 @@ src/
 examples/       — usage demos
 tests/          — integration + snapshot tests
 ```
+
+## Error Reporting
+
+Uncaught errors print the error name, message, and a stack trace of user frames
+to stderr, and the process exits with status 1 so failures are visible in CI:
+
+```console
+$ ravel err.js
+Uncaught TypeError: cannot read property 'x' of null
+    at inner (err.js:1:18)
+    at outer (err.js:2:19)
+    at <anonymous> (err.js:3:1)
+$ echo $?
+1
+```
+
+Promise rejections that are never handled are reported the same way:
+
+```console
+$ ravel rej.js
+Unhandled promise rejection: Error: nope
+    at <anonymous> (rej.js:1:19)
+```
+
+A rejection that gets a handler — including one attached in a later microtask,
+as `await` does — is not reported. See `examples/errors.js`.
 
 ## JSX Support
 

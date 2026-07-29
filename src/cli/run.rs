@@ -1,18 +1,20 @@
 use std::path::Path;
 
 use crate::core::{Engine, run_module, setup_module_loader};
+use crate::error::{report_pending_rejections, report_uncaught};
 
 use super::read_and_transpile;
 
-pub fn run(filename: &str) {
+/// Returns false if the script failed, so the caller can exit non-zero.
+pub fn run(filename: &str) -> bool {
     let source = match read_and_transpile(filename) {
         Some(s) => s,
-        None => return,
+        None => return false,
     };
-    run_source(&source, filename);
+    run_source(&source, filename)
 }
 
-pub fn run_source(source: &str, filename: &str) {
+pub fn run_source(source: &str, filename: &str) -> bool {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
@@ -31,21 +33,31 @@ pub fn run_source(source: &str, filename: &str) {
 
         setup_module_loader(&engine.runtime, &root).await;
 
-        rquickjs::async_with!(engine.context => |ctx| {
+        let ok = rquickjs::async_with!(engine.context => |ctx| {
+            let mut ok = true;
             if let Err(e) = Engine::setup_all_apis(&ctx, &root) {
                 eprintln!("Environment setup error: {}", e);
+                ok = false;
             }
             if let Err(e) = Engine::inject_globals(&ctx, &file, &dir, false) {
                 eprintln!("Global injection error: {}", e);
+                ok = false;
             }
 
-            match run_module(&ctx, source, &file_name).await {
-                Ok(_) => {}
-                Err(e) => eprintln!("QuickJS error: {}", e),
+            if let Err(e) = run_module(&ctx, source, &file_name).await {
+                report_uncaught(&ctx, &e);
+                ok = false;
             }
+            ok
         })
         .await;
 
-        engine.drain_timers().await;
-    });
+        // Settle promise callbacks queued by the module body before deciding
+        // whether a rejection went unhandled.
+        let jobs_ok = engine.run_pending_jobs().await;
+        let timers_ok = engine.drain_timers().await;
+
+        // Timer callbacks can reject too, so check after the event loop.
+        ok && jobs_ok && timers_ok && !report_pending_rejections()
+    })
 }

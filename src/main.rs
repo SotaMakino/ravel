@@ -35,7 +35,9 @@ fn main() {
 
     if args.iter().any(|a| a == "--build") {
         if positional.len() > 1 {
-            cli::build(positional[1]);
+            if !cli::build(positional[1]) {
+                std::process::exit(1);
+            }
         } else {
             eprintln!("Error: --build requires a script file");
             eprintln!("Usage: ravel --build <file>");
@@ -45,7 +47,9 @@ fn main() {
     }
 
     if positional.len() > 1 {
-        cli::run(positional[1]);
+        if !cli::run(positional[1]) {
+            std::process::exit(1);
+        }
         return;
     }
 

@@ -3,6 +3,7 @@ use rustyline::DefaultEditor;
 
 use crate::console::value_to_string;
 use crate::core::Engine;
+use crate::error::{report_pending_rejections, report_uncaught};
 
 pub fn repl() {
     let mut rl = DefaultEditor::new().expect("Failed to initialize readline");
@@ -46,12 +47,17 @@ pub fn repl() {
                     Ok(val) => {
                         println!("{}", value_to_string(&val));
                     }
-                    Err(e) => eprintln!("QuickJS error: {}", e),
+                    Err(e) => report_uncaught(&ctx, &e),
                 }
             })
             .await;
 
+            engine.run_pending_jobs().await;
             engine.drain_timers().await;
+
+            // Report and reset per line: the REPL keeps going either way, and
+            // one line's rejection must not be blamed on the next.
+            report_pending_rejections();
         }
     });
 

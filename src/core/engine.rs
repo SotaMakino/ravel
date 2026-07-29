@@ -6,6 +6,7 @@ use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Result};
 use tokio::sync::mpsc;
 
 use crate::console::setup_console;
+use crate::error::{format_thrown, forget_rejection, report_uncaught, track_rejection};
 use crate::fs::setup_fs;
 use crate::jsx::setup_jsx_runtime;
 use crate::timer::{TimerMessage, TimerState, get_timer_state, set_timer_state, setup_timers};
@@ -24,6 +25,17 @@ impl Engine {
         let context = AsyncContext::full(&runtime)
             .await
             .expect("Failed to create context");
+        runtime
+            .set_host_promise_rejection_tracker(Some(Box::new(
+                |_ctx, promise, reason, is_handled| {
+                    if is_handled {
+                        forget_rejection(&promise);
+                    } else {
+                        track_rejection(&promise, &reason);
+                    }
+                },
+            )))
+            .await;
         let (timer_state, timer_rx) = TimerState::new();
         set_timer_state(timer_state);
         Self {
@@ -72,37 +84,76 @@ impl Engine {
         Ok(())
     }
 
-    pub async fn drain_timers(&mut self) {
+    /// Run queued microtasks (promise callbacks, `await` continuations) until
+    /// the queue is empty. Returns false if a job threw an uncaught error.
+    ///
+    /// `AsyncRuntime::idle` would do this too, but it reports job errors with
+    /// `println!`, which would corrupt build output on stdout.
+    pub async fn run_pending_jobs(&self) -> bool {
+        let mut ok = true;
         loop {
-            tokio::select! {
-                Some(msg) = self.timer_rx.recv() => {
-                    let ctx = self.context.clone();
+            match self.runtime.execute_pending_job().await {
+                Ok(true) => continue,
+                Ok(false) => break,
+                Err(exception) => {
+                    ok = false;
+                    let ctx = exception.0.clone();
                     rquickjs::async_with!(ctx => |ctx| {
-                        match msg {
-                            TimerMessage::FireTimeout(id) => {
-                                let _: Result<()> = ctx.eval(format!("__ravel_fire_timer({})", id));
-                                if let Some(state) = get_timer_state() {
-                                    state.entries.lock().unwrap().remove(&id);
-                                }
-                            }
-                            TimerMessage::FireInterval(id) => {
-                                let _: Result<()> = ctx.eval(format!("__ravel_fire_interval({})", id));
-                            }
-                        }
+                        eprintln!("Uncaught {}", format_thrown(&ctx.catch()));
                     })
                     .await;
                 }
-                _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                    if let Some(state) = get_timer_state() {
-                        if !state.has_pending() {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
             }
         }
+        ok
+    }
+
+    /// Returns false if any timer callback threw an uncaught error.
+    pub async fn drain_timers(&mut self) -> bool {
+        let mut ok = true;
+        loop {
+            let fired = tokio::select! {
+                Some(msg) = self.timer_rx.recv() => Some(msg),
+                _ = tokio::time::sleep(Duration::from_millis(10)) => None,
+            };
+
+            let Some(msg) = fired else {
+                let has_pending = get_timer_state().is_some_and(|state| state.has_pending());
+                if !has_pending {
+                    break;
+                }
+                continue;
+            };
+
+            let ctx = self.context.clone();
+            ok &= rquickjs::async_with!(ctx => |ctx| {
+                let mut fired_ok = true;
+                match msg {
+                    TimerMessage::FireTimeout(id) => {
+                        if let Err(e) = ctx.eval::<(), _>(format!("__ravel_fire_timer({})", id)) {
+                            report_uncaught(&ctx, &e);
+                            fired_ok = false;
+                        }
+                        if let Some(state) = get_timer_state() {
+                            state.entries.lock().unwrap().remove(&id);
+                        }
+                    }
+                    TimerMessage::FireInterval(id) => {
+                        if let Err(e) = ctx.eval::<(), _>(format!("__ravel_fire_interval({})", id)) {
+                            report_uncaught(&ctx, &e);
+                            fired_ok = false;
+                        }
+                    }
+                }
+                fired_ok
+            })
+            .await;
+
+            // A timer callback can queue promise jobs; run them before the
+            // next tick so `await` inside a callback makes progress.
+            ok &= self.run_pending_jobs().await;
+        }
+        ok
     }
 }
 

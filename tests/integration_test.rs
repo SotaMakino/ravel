@@ -19,6 +19,25 @@ fn run_file(name: &str, source: &str) -> (String, String) {
     result
 }
 
+/// Like `run_ravel`, but also reports the process exit code.
+fn run_ravel_status(args: &[&str]) -> (String, String, i32) {
+    let output = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .args(args)
+        .output()
+        .expect("Failed to execute ravel");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    (stdout, stderr, output.status.code().unwrap_or(-1))
+}
+
+fn run_file_status(name: &str, source: &str) -> (String, String, i32) {
+    let tmp = std::env::temp_dir().join(name);
+    std::fs::write(&tmp, source).expect("Failed to write temp file");
+    let result = run_ravel_status(&[tmp.to_str().unwrap()]);
+    let _ = std::fs::remove_file(tmp);
+    result
+}
+
 fn run_file_with_deps(name: &str, source: &str, deps: &[(&str, &str)]) -> (String, String) {
     let dir = std::env::temp_dir().join(format!("ravel_test_{}", name));
     std::fs::create_dir_all(&dir).expect("Failed to create test dir");
@@ -731,4 +750,170 @@ fn test_serve_serves_files() {
 fn test_serve_default_port() {
     let (out, _err) = run_ravel(&["--help"]);
     assert!(out.contains("--serve [PORT]"));
+}
+
+// --- Error reporting and exit codes ---
+
+#[test]
+fn test_uncaught_error_reports_message_and_exits_nonzero() {
+    let (_out, err, code) = run_file_status("err_msg.js", "null.x;");
+    assert!(
+        err.contains("Uncaught TypeError:") && err.contains("null"),
+        "stderr was: {}",
+        err
+    );
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_uncaught_error_includes_stack_frames() {
+    let (_out, err, code) = run_file_status(
+        "err_stack.js",
+        "function a(){ null.x }\nfunction b(){ a() }\nb();",
+    );
+    assert!(err.contains("    at a ("), "stderr was: {}", err);
+    assert!(err.contains("    at b ("), "stderr was: {}", err);
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_uncaught_error_reports_line_number() {
+    let (_out, err, code) = run_file_status("err_line.js", "console.log(1);\nnull.x;");
+    assert!(err.contains(":2:"), "expected line 2 in stderr: {}", err);
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_thrown_non_error_value_is_reported() {
+    let (_out, err, code) = run_file_status("err_string.js", "throw 'boom';");
+    assert!(err.contains("Uncaught boom"), "stderr was: {}", err);
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_custom_error_name_is_preserved() {
+    let (_out, err, code) = run_file_status("err_range.js", "throw new RangeError('too big');");
+    assert!(
+        err.contains("Uncaught RangeError: too big"),
+        "stderr was: {}",
+        err
+    );
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_successful_script_exits_zero() {
+    let (out, err, code) = run_file_status("ok_exit.js", "console.log('fine');");
+    assert!(out.contains("fine"));
+    assert_eq!(err, "");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn test_missing_file_reports_error_and_exits_nonzero() {
+    let (_out, err, code) = run_ravel_status(&["definitely_not_a_file.js"]);
+    assert!(err.contains("cannot read"), "stderr was: {}", err);
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_unhandled_rejection_is_reported() {
+    let (_out, err, code) = run_file_status(
+        "rej_unhandled.js",
+        "Promise.reject(new Error('nope'));\nconsole.log('after');",
+    );
+    assert!(
+        err.contains("Unhandled promise rejection: Error: nope"),
+        "stderr was: {}",
+        err
+    );
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_handled_rejection_is_not_reported() {
+    let (out, err, code) = run_file_status(
+        "rej_handled.js",
+        "Promise.reject(new Error('x')).catch(() => console.log('caught'));",
+    );
+    assert!(out.contains("caught"));
+    assert_eq!(err, "");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn test_throw_inside_then_becomes_unhandled_rejection() {
+    let (_out, err, code) = run_file_status(
+        "rej_then.js",
+        "Promise.resolve().then(() => { throw new Error('in then'); });",
+    );
+    assert!(
+        err.contains("Unhandled promise rejection: Error: in then"),
+        "stderr was: {}",
+        err
+    );
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_error_in_timer_callback_exits_nonzero() {
+    let (_out, err, code) = run_file_status("err_timer.js", "setTimeout(() => { null.x; }, 1);");
+    assert!(err.contains("Uncaught TypeError:"), "stderr was: {}", err);
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_timer_stack_hides_ravel_internals() {
+    let (_out, err, _code) = run_file_status("err_timer2.js", "setTimeout(() => { null.x; }, 1);");
+    assert!(!err.contains("__ravel_"), "internal frames leaked: {}", err);
+}
+
+#[test]
+fn test_failed_build_exits_nonzero() {
+    let dir = std::env::temp_dir().join("ravel_test_build_fail");
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("build.js");
+    std::fs::write(&script, "throw new Error('build broke');").unwrap();
+    let (_out, err, code) = run_ravel_status(&["--build", script.to_str().unwrap()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        err.contains("Uncaught Error: build broke"),
+        "stderr was: {}",
+        err
+    );
+    assert_eq!(code, 1);
+}
+
+// --- Microtasks and async continuations ---
+
+#[test]
+fn test_microtasks_run_before_exit() {
+    let (out, err, code) = run_file_status(
+        "micro.js",
+        "Promise.resolve().then(() => console.log('microtask'));\nconsole.log('sync');",
+    );
+    assert!(out.contains("microtask"), "stdout was: {}", out);
+    assert_eq!(err, "");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn test_await_continuation_runs() {
+    let (out, _err, code) = run_file_status(
+        "await.js",
+        "async function f(){ await null; console.log('after await'); }\nf();",
+    );
+    assert!(out.contains("after await"), "stdout was: {}", out);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn test_awaited_rejection_can_be_caught() {
+    let (out, err, code) = run_file_status(
+        "await_catch.js",
+        "async function f(){ try { await Promise.reject(new Error('r')); } catch(e) { console.log('caught:', e.message); } }\nf();",
+    );
+    assert!(out.contains("caught: r"), "stdout was: {}", out);
+    assert_eq!(err, "");
+    assert_eq!(code, 0);
 }

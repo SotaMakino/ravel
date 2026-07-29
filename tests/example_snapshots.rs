@@ -83,6 +83,13 @@ fn test_example_jsx() {
 }
 
 #[test]
+fn test_example_errors() {
+    let (out, err) = run_ravel(&["examples/errors.js"]);
+    let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
+    insta::assert_snapshot!("errors", output);
+}
+
+#[test]
 fn test_example_site_build() {
     let _ = std::fs::remove_dir_all("examples/site/dist");
     let (out, err) = run_ravel(&["--build", "examples/site/build.tsx"]);

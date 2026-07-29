@@ -34,7 +34,13 @@ pub fn print_version() {
 }
 
 fn read_and_transpile(filename: &str) -> Option<String> {
-    let raw_source = fs::read_to_string(filename).expect("Failed to read file");
+    let raw_source = match fs::read_to_string(filename) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: cannot read '{}': {}", filename, e);
+            return None;
+        }
+    };
     if is_typescript_file(filename) {
         match transpile_ts(&raw_source, filename) {
             Ok(js) => Some(js),

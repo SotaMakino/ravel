@@ -1,18 +1,20 @@
 use std::fs;
 
 use crate::core::{Engine, run_module, setup_module_loader};
+use crate::error::{report_pending_rejections, report_uncaught};
 
 use super::read_and_transpile;
 
-pub fn build(filename: &str) {
+/// Returns false if the build failed, so the caller can exit non-zero.
+pub fn build(filename: &str) -> bool {
     let source = match read_and_transpile(filename) {
         Some(s) => s,
-        None => return,
+        None => return false,
     };
-    build_source(&source, filename);
+    build_source(&source, filename)
 }
 
-pub fn build_source(source: &str, filename: &str) {
+pub fn build_source(source: &str, filename: &str) -> bool {
     let original_dir = std::env::current_dir().expect("Failed to get current directory");
     let abs_path = std::path::Path::new(filename)
         .canonicalize()
@@ -22,7 +24,7 @@ pub fn build_source(source: &str, filename: &str) {
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
-    rt.block_on(async {
+    let ok = rt.block_on(async {
         let engine = Engine::new().await;
 
         let dir = root.to_string_lossy().to_string();
@@ -33,20 +35,29 @@ pub fn build_source(source: &str, filename: &str) {
 
         setup_module_loader(&engine.runtime, &root).await;
 
-        rquickjs::async_with!(engine.context => |ctx| {
+        let ok = rquickjs::async_with!(engine.context => |ctx| {
+            let mut ok = true;
             if let Err(e) = Engine::setup_all_apis(&ctx, &root) {
                 eprintln!("Environment setup error: {}", e);
+                ok = false;
             }
             if let Err(e) = Engine::inject_globals(&ctx, &file, &dir, true) {
                 eprintln!("Global injection error: {}", e);
+                ok = false;
             }
 
-            match run_module(&ctx, source, &file_name).await {
-                Ok(_) => {}
-                Err(e) => eprintln!("QuickJS error: {}", e),
+            if let Err(e) = run_module(&ctx, source, &file_name).await {
+                report_uncaught(&ctx, &e);
+                ok = false;
             }
+            ok
         })
         .await;
+
+        // Build mode has no event loop, but promise callbacks still need to run.
+        let jobs_ok = engine.run_pending_jobs().await;
+
+        ok && jobs_ok && !report_pending_rejections()
     });
 
     if script_dist != original_dir.join("dist") && script_dist.exists() {
@@ -57,4 +68,6 @@ pub fn build_source(source: &str, filename: &str) {
         let _ = fs::create_dir_all(target.parent().unwrap());
         let _ = fs::rename(&script_dist, &target);
     }
+
+    ok
 }
