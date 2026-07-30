@@ -64,6 +64,14 @@ function note(tag, props, ...children) {
     }
     return _makeHtml('<' + tag + attrs + '>' + kids + '</' + tag + '>');
 }
+// The escape hatch, for the places where markup has to be written by hand:
+// an inline import map, JSON-LD, an SVG sprite. Script and style bodies are
+// raw text to a browser, so an escaped '"' there stays broken rather than
+// being decoded -- escaping is not merely unnecessary, it corrupts them.
+//
+// Everything else is escaped, and this has to be asked for by name. Never
+// hand it a value that came from outside the build.
+note.raw = _makeHtml;
 "#;
     ctx.eval::<(), _>(html)?;
     Ok(())
@@ -203,6 +211,49 @@ mod tests {
                 .eval(r#"String(note("div", { title: "a & b" }, "test"))"#)
                 .unwrap();
             assert_eq!(result, r#"<div title="a &amp; b">test</div>"#);
+        });
+    }
+
+    #[test]
+    fn test_note_raw_passes_markup_through() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            let out: String = ctx
+                .eval(r#"String(note("script", { type: "importmap" }, note.raw('{"a":"./b.js"}')))"#)
+                .unwrap();
+            assert_eq!(
+                out,
+                r#"<script type="importmap">{"a":"./b.js"}</script>"#
+            );
+        });
+    }
+
+    #[test]
+    fn test_note_raw_survives_nesting() {
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            let out: String = ctx
+                .eval(r#"String(note("div", null, note("span", null, note.raw("<b>x</b>"))))"#)
+                .unwrap();
+            assert_eq!(out, "<div><span><b>x</b></span></div>");
+        });
+    }
+
+    #[test]
+    fn test_note_still_escapes_when_raw_is_not_used() {
+        // The escape hatch must not relax the default.
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = Context::full(&rt).unwrap();
+        ctx.with(|ctx| {
+            setup_jsx_runtime(&ctx).unwrap();
+            let out: String = ctx
+                .eval(r#"String(note("script", null, '{"a":"./b.js"}'))"#)
+                .unwrap();
+            assert!(out.contains("&quot;"), "got: {}", out);
         });
     }
 

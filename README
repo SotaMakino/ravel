@@ -45,7 +45,10 @@ JSX. Tokio drives timers and file I/O. Everything else is written here:
 
   TypeScript    .ts and .tsx run directly. No build step.
 
-  JSX           .tsx renders to HTML strings, for static sites.
+  JSX           .tsx renders to HTML strings, for static sites. Children
+                are HTML-escaped; note.raw(s) opts a value out, which is
+                needed for script and style bodies where an escaped
+                quote would corrupt rather than protect.
 
   Web APIs      TextEncoder, TextDecoder, console, process.
 
