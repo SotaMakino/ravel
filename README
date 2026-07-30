@@ -32,6 +32,11 @@ JSX. Tokio drives timers and file I/O. Everything else is written here:
                 happens on Tokio, so the thread is free while the disk is
                 busy. Reads issued together run together.
 
+  Modules       Bare imports walk up through node_modules. package.json
+                exports and imports maps are honoured, including subpath
+                patterns and conditions. A package with an exports map
+                publishes only what that map names.
+
   Sandbox       fs is scoped to the script's directory. Path traversal,
                 symlink escape, and null bytes are blocked.
 
@@ -68,8 +73,19 @@ Known limits
 tokio::fs is a thread pool, not true async file I/O. Node does the same.
 Only io_uring really solves this.
 
-Bare imports do not search node_modules, and an extensionless import
-resolves to .js only, so ./foo never finds foo.ts.
+Finding a package is not the same as running it. ravel loads ES modules
+only, so a CommonJS package resolves and then fails to load, and a
+package reaching for a node global ravel does not have (Buffer, and the
+node: builtins) fails at runtime. Pure ESM packages work.
+
+The conditions matched in exports and imports are "ravel", "import",
+and "default", in that order. "node" is not one of them: ravel has no
+node builtins, so a package's node entry point is the one least likely
+to run here, and falling through to "default" picks the portable build.
+
+An extensionless import tries .js, .mjs, .ts, then .tsx, so ./foo finds
+foo.js before foo.ts. Node requires the extension in ESM; ravel does
+not, which makes ravel accept imports Node would reject.
 
 Delays under 1ms are rounded up to 1ms, as Node does. setTimeout(fn, 0)
 does not run fn on the next turn; it runs it a millisecond later.
@@ -82,9 +98,6 @@ Roadmap
 -------
 
 Ordered by what each one teaches, not by usefulness.
-
-  Module resolution   node_modules lookup, package.json exports and
-                      imports maps, conditional exports.
 
   fetch and friends   fetch, Request/Response, URL, crypto,
                       AbortController, streams.

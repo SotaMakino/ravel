@@ -2,8 +2,9 @@ use rquickjs::{
     loader::{Loader, Resolver, ScriptLoader},
     AsyncRuntime, Ctx, Error, Module, Promise, Result,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use crate::core::resolver::ModuleResolver;
 use crate::error::{forget_rejection, report_uncaught};
 use crate::transpiler::{is_typescript_file, transpile_ts};
 
@@ -36,51 +37,12 @@ impl Loader for TsModuleLoader {
     }
 }
 
-struct ModuleResolver {
-    root: PathBuf,
-}
-
-impl ModuleResolver {
-    fn new(root: &Path) -> Self {
-        Self {
-            root: root.to_path_buf(),
-        }
-    }
-}
-
 impl Resolver for ModuleResolver {
-    fn resolve<'js>(
-        &mut self,
-        _ctx: &Ctx<'js>,
-        base: &str,
-        name: &str,
-    ) -> rquickjs::Result<String> {
-        let base_path = PathBuf::from(base);
-        let resolved = if name.starts_with("./") || name.starts_with("../") {
-            if let Some(parent) = base_path.parent() {
-                parent.join(name)
-            } else {
-                self.root.join(name)
-            }
-        } else {
-            self.root.join(name)
-        };
-
-        let resolved = if resolved.extension().is_none() {
-            let mut resolved = resolved;
-            resolved.set_extension("js");
-            resolved
-        } else {
-            resolved
-        };
-
-        let resolved = if resolved.is_relative() {
-            self.root.join(&resolved)
-        } else {
-            resolved
-        };
-
-        Ok(resolved.to_string_lossy().to_string())
+    fn resolve<'js>(&mut self, _ctx: &Ctx<'js>, base: &str, name: &str) -> rquickjs::Result<String> {
+        match ModuleResolver::resolve(self, base, name) {
+            Ok(path) => Ok(path.to_string_lossy().to_string()),
+            Err(message) => Err(Error::new_resolving_message(base, name, message)),
+        }
     }
 }
 

@@ -1,0 +1,20 @@
+---
+source: tests/example_snapshots.rs
+expression: output
+---
+=== STDOUT ===
+=== bare specifier ===
+Hello, ravel!
+condition picked: ravel.js (the "ravel" condition)
+=== published subpath ===
+HELLO, RAVEL!
+=== pattern exports ===
+circle r=2: 12.57
+square s=3: 9
+=== #imports ===
+#config gave: ravel
+#greeter gave: Hello, again!
+=== encapsulation ===
+greet/internal.js is not exported, so it cannot be imported
+
+=== STDERR ===

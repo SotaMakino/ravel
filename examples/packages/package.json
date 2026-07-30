@@ -1,0 +1,7 @@
+{
+  "name": "packages-example",
+  "imports": {
+    "#config": "./src/config.js",
+    "#greeter": "greet"
+  }
+}

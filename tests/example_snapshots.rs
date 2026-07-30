@@ -66,6 +66,13 @@ fn test_example_event_loop() {
 }
 
 #[test]
+fn test_example_packages() {
+    let (out, err) = run_ravel(&["examples/packages/main.js"]);
+    let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
+    insta::assert_snapshot!("packages", output);
+}
+
+#[test]
 fn test_example_esm() {
     let (out, err) = run_ravel(&["examples/esm.js"]);
     let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);

@@ -1406,3 +1406,240 @@ fn test_timers_wake_on_their_deadline_not_on_a_tick() {
         elapsed
     );
 }
+
+// --- Module resolution ---
+
+/// Build a project tree from `(relative path, contents)` pairs, run the entry
+/// file, and clean up. The entry is always `main.js`.
+fn run_project(name: &str, files: &[(&str, &str)]) -> (String, String, i32) {
+    let dir = std::env::temp_dir().join(format!("ravel_resolve_{}", name));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (path, contents) in files {
+        let full = dir.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, contents).unwrap();
+    }
+    let result = run_ravel_status(&[dir.join("main.js").to_str().unwrap()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+#[test]
+fn test_bare_import_resolves_from_node_modules() {
+    let (out, err, code) = run_project(
+        "bare",
+        &[
+            ("main.js", r#"import { v } from "dep"; console.log(v);"#),
+            ("node_modules/dep/package.json", r#"{"main": "./lib.js"}"#),
+            ("node_modules/dep/lib.js", "export const v = 'from dep';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("from dep"), "stdout was: {}", out);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn test_bare_import_walks_up_the_tree() {
+    let (out, err, _) = run_project(
+        "walkup",
+        &[
+            ("main.js", r#"import "./nested/deep/leaf.js";"#),
+            (
+                "nested/deep/leaf.js",
+                r#"import { v } from "dep"; console.log(v);"#,
+            ),
+            ("node_modules/dep/index.js", "export const v = 'found above';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("found above"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_nearest_node_modules_copy_wins() {
+    let (out, err, _) = run_project(
+        "nearest",
+        &[
+            ("main.js", r#"import "./app/use.js";"#),
+            ("app/use.js", r#"import { v } from "dep"; console.log(v);"#),
+            ("node_modules/dep/index.js", "export const v = 'outer';"),
+            ("app/node_modules/dep/index.js", "export const v = 'inner';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("inner"), "stdout was: {}", out);
+    assert!(!out.contains("outer"));
+}
+
+#[test]
+fn test_scoped_package_with_pattern_exports() {
+    let (out, err, _) = run_project(
+        "scoped",
+        &[
+            (
+                "main.js",
+                r#"import { v } from "@scope/pkg/thing"; console.log(v);"#,
+            ),
+            (
+                "node_modules/@scope/pkg/package.json",
+                r#"{"exports": {"./*": "./src/*.js"}}"#,
+            ),
+            ("node_modules/@scope/pkg/src/thing.js", "export const v = 'patterned';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("patterned"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_conditional_exports_pick_the_import_entry() {
+    let (out, err, _) = run_project(
+        "conditions",
+        &[
+            ("main.js", r#"import { v } from "dep"; console.log(v);"#),
+            (
+                "node_modules/dep/package.json",
+                r#"{"exports": {"require": "./cjs.js", "import": "./esm.js", "default": "./d.js"}}"#,
+            ),
+            ("node_modules/dep/cjs.js", "export const v = 'cjs';"),
+            ("node_modules/dep/esm.js", "export const v = 'esm';"),
+            ("node_modules/dep/d.js", "export const v = 'default';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("esm"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_exports_encapsulates_unlisted_files() {
+    let (_out, err, code) = run_project(
+        "encapsulation",
+        &[
+            ("main.js", r#"import "dep/private.js";"#),
+            (
+                "node_modules/dep/package.json",
+                r#"{"exports": {".": "./main.js"}}"#,
+            ),
+            ("node_modules/dep/main.js", ""),
+            ("node_modules/dep/private.js", "export const leaked = true;"),
+        ],
+    );
+    assert!(err.contains("is not exported"), "stderr was: {}", err);
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_imports_map_resolves_hash_specifiers() {
+    let (out, err, _) = run_project(
+        "imports",
+        &[
+            ("main.js", r##"import { v } from "#internal"; console.log(v);"##),
+            ("package.json", r##"{"imports": {"#internal": "./src/thing.js"}}"##),
+            ("src/thing.js", "export const v = 'via imports map';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("via imports map"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_imports_map_can_alias_a_package() {
+    let (out, err, _) = run_project(
+        "imports_alias",
+        &[
+            ("main.js", r##"import { v } from "#dep"; console.log(v);"##),
+            ("package.json", r##"{"imports": {"#dep": "real"}}"##),
+            ("node_modules/real/index.js", "export const v = 'aliased';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("aliased"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_extensionless_relative_import_finds_typescript() {
+    // Used to be a documented limit: ./helper never found helper.ts.
+    let (out, err, _) = run_project(
+        "ts_ext",
+        &[
+            ("main.js", r#"import { v } from "./helper"; console.log(v);"#),
+            ("helper.ts", "export const v: string = 'typescript';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("typescript"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_directory_import_uses_index() {
+    let (out, err, _) = run_project(
+        "dir_index",
+        &[
+            ("main.js", r#"import { v } from "./utils"; console.log(v);"#),
+            ("utils/index.js", "export const v = 'index';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("index"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_missing_package_names_itself_in_the_error() {
+    let (_out, err, code) = run_project(
+        "missing_pkg",
+        &[("main.js", r#"import "no-such-package";"#)],
+    );
+    assert!(
+        err.contains("cannot find package 'no-such-package'"),
+        "stderr was: {}",
+        err
+    );
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_exports_target_cannot_escape_its_package() {
+    let (_out, err, code) = run_project(
+        "escape",
+        &[
+            ("main.js", r#"import "dep/../../outside";"#),
+            (
+                "node_modules/dep/package.json",
+                r#"{"exports": {"./*": "./*.js"}}"#,
+            ),
+            ("outside.js", "export const leaked = true;"),
+        ],
+    );
+    assert!(
+        err.contains("escapes its package"),
+        "stderr was: {}",
+        err
+    );
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn test_one_file_imported_two_ways_is_one_module() {
+    // Module state must not be duplicated when the same file is reached by
+    // two different specifiers.
+    let (out, err, _) = run_project(
+        "identity",
+        &[
+            (
+                "main.js",
+                r#"import { bump, count } from "./state.js";
+                   import { bump as bump2 } from "./nested/../state.js";
+                   bump(); bump2();
+                   console.log("count:", count());"#,
+            ),
+            (
+                "state.js",
+                "let n = 0; export const bump = () => { n += 1; }; export const count = () => n;",
+            ),
+            ("nested/keep.js", ""),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("count: 2"), "stdout was: {}", out);
+}
