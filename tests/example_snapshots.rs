@@ -119,18 +119,11 @@ fn test_example_errors() {
 #[test]
 fn test_example_site_build() {
     let _ = std::fs::remove_dir_all("examples/site/dist");
+    let _ = std::fs::remove_dir_all("dist");
+    // No path filters: the build script no longer prints absolute paths.
     let (out, err) = run_ravel(&["--build", "examples/site/build.tsx"]);
     let output = format!("=== STDOUT ===\n{}\n=== STDERR ===\n{}", out, err);
-    let mut settings = insta::Settings::clone_current();
-    settings.add_filter(
-        r"/[^\s]*ravel/examples/site/build\.tsx",
-        "<PROJECT_ROOT>/examples/site/build.tsx",
-    );
-    settings.add_filter(
-        r"/[^\s]*ravel/examples/site",
-        "<PROJECT_ROOT>/examples/site",
-    );
-    let _guard = settings.bind_to_scope();
     insta::assert_snapshot!("site_build", output);
     let _ = std::fs::remove_dir_all("examples/site/dist");
+    let _ = std::fs::remove_dir_all("dist");
 }

@@ -1,34 +1,39 @@
-export function Layout(props: { title: string; children: string }) {
+// The shell ravel renders at build time. Everything inside #app is drawn by
+// Preact in the browser -- see app.js.
+
+export function Shell(props: {
+  title: string;
+  base: string;
+  version: string;
+  importMap: string;
+}) {
   return (
-    <html lang="en">
+    <html lang="en" data-ravel-version={props.version}>
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{props.title}</title>
-        <link rel="stylesheet" href="/ravel/style.css" />
-        <base href="/ravel/" />
+        <link rel="stylesheet" href={props.base + "style.css"} />
+        <base href={props.base} />
+        {/*
+          An import map must be inline: browsers do not load external ones. Its
+          body is raw text to the parser, so note.raw keeps the quotes intact
+          instead of escaping them into &quot;. This map is what lets app.js
+          write `from "preact"` with no bundler in the pipeline.
+        */}
+        <script type="importmap">{note.raw(props.importMap)}</script>
       </head>
       <body>
-        <header>
-          <nav>
-            <a href="./">Home</a> | <a href="about">About</a> | <a href="blog">Blog</a>
-          </nav>
-        </header>
-        <main>{props.children}</main>
-        <footer>
-          <p>Built with <strong>Ravel v{ravel.version}</strong></p>
-        </footer>
+        <div id="app">
+          <noscript>
+            <p>
+              This page is rendered in the browser, so it needs JavaScript
+              enabled.
+            </p>
+          </noscript>
+        </div>
+        <script type="module" src="./app.js"></script>
       </body>
     </html>
-  );
-}
-
-export function PostCard(props: { slug: string; title: string; date: string; excerpt: string }) {
-  return (
-    <article class="post-card">
-      <h2><a href={"blog/" + props.slug + ".html"}>{props.title}</a></h2>
-      <time>{props.date}</time>
-      <p>{props.excerpt}</p>
-    </article>
   );
 }

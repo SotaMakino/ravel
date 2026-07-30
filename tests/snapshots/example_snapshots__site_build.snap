@@ -4,17 +4,10 @@ expression: output
 ---
 === STDOUT ===
 Building with ravel v0.3.0
-__filename: <PROJECT_ROOT>/examples/site/build.tsx
-__dirname: <PROJECT_ROOT>/examples/site
-RAVEL_BUILD=1
 wrote dist/style.css
+wrote dist/posts.json (3 posts)
+wrote dist/app.js
 wrote dist/index.html
-wrote dist/about.html
-wrote dist/blog/index.html
-wrote dist/blog/hello-world.html
-wrote dist/blog/ravel-intro.html
-wrote dist/blog/deployment.html
-dist/index.html exists: true
-done - 6 pages, 1 CSS
+done - 1 page, 1 CSS, 1 module, 1 data file
 
 === STDERR ===

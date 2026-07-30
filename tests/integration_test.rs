@@ -671,26 +671,40 @@ fn test_example_site_build() {
     let _ = std::fs::remove_dir_all("dist");
     let (out, err) = run_ravel(&["--build", "examples/site/build.tsx"]);
     assert_eq!(err, "");
-    assert!(out.contains("wrote dist/index.html"));
-    assert!(out.contains("wrote dist/about.html"));
-    assert!(out.contains("wrote dist/style.css"));
-    assert!(out.contains("wrote dist/blog/index.html"));
-    assert!(out.contains("done"));
+    for expected in [
+        "wrote dist/index.html",
+        "wrote dist/style.css",
+        "wrote dist/posts.json",
+        "wrote dist/app.js",
+        "done",
+    ] {
+        assert!(out.contains(expected), "missing {:?} in: {}", expected, out);
+    }
 
     let index = std::fs::read_to_string("dist/index.html").unwrap();
-    assert!(index.contains("<title>Home</title>"));
-    assert!(index.contains("<h1>Welcome</h1>"));
+    assert!(index.contains("<title>ravel</title>"));
+    assert!(index.contains(r#"<div id="app">"#));
+    assert!(index.contains("/ravel/style.css"));
 
-    let about = std::fs::read_to_string("dist/about.html").unwrap();
-    assert!(about.contains("<title>About</title>"));
-    assert!(about.contains("<h1>About</h1>"));
+    // The import map has to survive with real quotes: escaping it to &quot;
+    // would leave the browser unable to resolve "preact" at all.
+    assert!(
+        index.contains(r#"<script type="importmap">{"imports":{"preact":"#),
+        "import map was escaped or missing: {}",
+        index
+    );
+    // The `*` marks esm.sh deps external so htm shares one preact instance.
+    assert!(index.contains(r#""htm/preact":"https://esm.sh/*htm@"#));
+    assert!(!index.contains("&quot;"), "import map got HTML-escaped");
+
+    let app = std::fs::read_to_string("dist/app.js").unwrap();
+    assert!(app.contains(r#"from "preact""#), "app.js was not copied intact");
+
+    let posts = std::fs::read_to_string("dist/posts.json").unwrap();
+    assert_eq!(posts.matches(r#""slug""#).count(), 3, "posts.json: {}", posts);
 
     let css = std::fs::read_to_string("dist/style.css").unwrap();
     assert!(css.contains("font-family"));
-
-    let blog_index = std::fs::read_to_string("dist/blog/index.html").unwrap();
-    assert!(blog_index.contains("<title>Blog</title>"));
-    assert!(blog_index.contains("/ravel/style.css"));
 
     let _ = std::fs::remove_dir_all("dist");
 }
