@@ -1,9 +1,22 @@
 [package]
-name = "ravel"
+name = "ravel-runtime"
 version = "0.3.0"
 edition = "2024"
 license = "MIT"
 description = "A toy JavaScript/TypeScript runtime written in Rust"
+readme = "README"
+repository = "https://github.com/SotaMakino/ravel"
+keywords = ["javascript", "typescript", "runtime", "quickjs", "interpreter"]
+categories = ["development-tools"]
+
+# The crate is published as ravel-runtime because "ravel" is taken, but the
+# library and the binary keep the shorter name.
+[lib]
+name = "ravel"
+
+[[bin]]
+name = "ravel"
+path = "src/main.rs"
 
 [dependencies]
 rquickjs = { version = "0.11", features = ["futures", "macro", "loader"] }
