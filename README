@@ -81,10 +81,15 @@ only, so a CommonJS package resolves and then fails to load, and a
 package reaching for a node global ravel does not have (Buffer, and the
 node: builtins) fails at runtime. Pure ESM packages work.
 
-The conditions matched in exports and imports are "ravel", "import",
-and "default", in that order. "node" is not one of them: ravel has no
-node builtins, so a package's node entry point is the one least likely
-to run here, and falling through to "default" picks the portable build.
+ravel claims three conditions in exports and imports: "ravel", "import",
+and "default". Which of them wins is the package's call, not ravel's --
+matching walks the keys in the order the package.json writes them and
+takes the first one ravel claims. That is why "default" belongs last: it
+matches anything, so keys after it are unreachable.
+
+"node" is not claimed. ravel has no node builtins, so a package's node
+entry point is the one least likely to run here, and skipping it lets
+matching fall through to "default", which is the portable build.
 
 A package.json "module" field wins over "main". Node ignores that
 field entirely; ravel reads it because where a package ships both, the
