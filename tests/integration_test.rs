@@ -1679,3 +1679,143 @@ fn test_one_file_imported_two_ways_is_one_module() {
     assert_eq!(err, "");
     assert!(out.contains("count: 2"), "stdout was: {}", out);
 }
+
+// --- REPL ---
+
+/// Drive the REPL by piping lines to its stdin, in a directory of our making.
+fn run_repl(name: &str, lines: &str, files: &[(&str, &str)]) -> (String, String) {
+    let dir = std::env::temp_dir().join(format!("ravel_repl_{}", name));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for (path, contents) in files {
+        let full = dir.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, contents).unwrap();
+    }
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .current_dir(&dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to start the REPL");
+    child
+        .stdin
+        .as_mut()
+        .expect("no stdin")
+        .write_all(lines.as_bytes())
+        .expect("Failed to write to the REPL");
+    // Closing stdin is what ends the session.
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("REPL did not exit");
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
+}
+
+#[test]
+fn test_repl_imports_a_local_module() {
+    let (out, err) = run_repl(
+        "local",
+        "import { v } from \"./lib.js\"\nv\n",
+        &[("lib.js", "export const v = 'imported';")],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("imported"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_repl_import_bindings_survive_to_later_lines() {
+    // The point of the whole exercise: a module's scope ends with the line,
+    // so the binding has to be republished to still be there afterwards.
+    let (out, err) = run_repl(
+        "persist",
+        "import { add } from \"./m.js\"\nadd(2, 3)\nadd(10, 5)\n",
+        &[("m.js", "export const add = (a, b) => a + b;")],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("5"), "stdout was: {}", out);
+    assert!(out.contains("15"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_repl_import_forms() {
+    let (out, err) = run_repl(
+        "forms",
+        "import d from \"./m.js\"\nd\nimport { a as b } from \"./m.js\"\nb\nimport * as ns from \"./m.js\"\ntypeof ns.a\n",
+        &[(
+            "m.js",
+            "export default 'the-default'; export const a = 'aliased';",
+        )],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("the-default"), "default import: {}", out);
+    assert!(out.contains("aliased"), "aliased import: {}", out);
+    assert!(out.contains("string"), "namespace import: {}", out);
+}
+
+#[test]
+fn test_repl_bare_import_resolves_from_node_modules() {
+    let (out, err) = run_repl(
+        "bare",
+        "import { v } from \"dep\"\nv\n",
+        &[
+            ("node_modules/dep/package.json", r#"{"main": "./i.js"}"#),
+            ("node_modules/dep/i.js", "export const v = 'from dep';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("from dep"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_repl_survives_a_failed_import() {
+    let (out, err) = run_repl("recover", "import { x } from \"./gone.js\"\n42\n", &[]);
+    assert!(err.contains("Error resolving module"), "stderr: {}", err);
+    assert!(out.contains("42"), "the REPL stopped after the error: {}", out);
+    // A line that never started must not also claim to have finished.
+    assert!(!out.contains("undefined"), "spurious result line: {}", out);
+}
+
+#[test]
+fn test_repl_dynamic_import_works() {
+    let (out, err) = run_repl(
+        "dynamic",
+        "import(\"./m.js\").then(m => console.log(\"got\", m.v))\n",
+        &[("m.js", "export const v = 'dynamic';")],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("got dynamic"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_repl_declarations_still_persist() {
+    // Non-import lines stay scripts, so this must not have regressed.
+    let (out, err) = run_repl("decls", "var a = 1\nlet b = 2\nconst c = 3\na + b + c\n", &[]);
+    assert_eq!(err, "");
+    assert!(out.contains("6"), "stdout was: {}", out);
+}
+
+#[test]
+fn test_repl_module_is_evaluated_once() {
+    let (out, err) = run_repl(
+        "cache",
+        "import { v } from \"./m.js\"\nimport { v as w } from \"./m.js\"\nw\n",
+        &[(
+            "m.js",
+            "console.log('side effect'); export const v = 'cached';",
+        )],
+    );
+    assert_eq!(err, "");
+    assert_eq!(
+        out.matches("side effect").count(),
+        1,
+        "module body ran more than once: {}",
+        out
+    );
+    assert!(out.contains("cached"));
+}

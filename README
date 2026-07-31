@@ -102,6 +102,12 @@ not, which makes ravel accept imports Node would reject.
 Delays under 1ms are rounded up to 1ms, as Node does. setTimeout(fn, 0)
 does not run fn on the next turn; it runs it a millisecond later.
 
+The REPL runs an import line as a module and copies what it binds onto
+globalThis, because a module's scope ends with the line. Only the
+imported names survive: a `const` declared on the same line as an import
+goes with the module scope. Top-level await is still a script-mode
+syntax error unless the line also imports something.
+
 A top-level await on a promise that nothing can settle exits 0. Once the
 loop has no timers and no reads left, there is no work that could settle
 it, so ravel stops instead of reporting the stall.

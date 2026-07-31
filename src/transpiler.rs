@@ -1,4 +1,5 @@
 use oxc_allocator::Allocator;
+use oxc_ast::ast::{ImportDeclarationSpecifier, Statement};
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
@@ -52,6 +53,42 @@ pub fn transpile_ts(source: &str, filename: &str) -> Result<String, String> {
     Ok(output)
 }
 
+/// The local names an `import` line binds, or `None` when the line has no
+/// import declarations at all.
+///
+/// The REPL needs this because `import` is only legal in a module, and a
+/// module gets its own scope: whatever it binds vanishes when the line ends.
+/// Knowing the names lets the REPL republish them so the next line can still
+/// see them. `None` also covers a line that does not parse, which is left for
+/// the engine to report against the real source.
+pub fn import_bindings(source: &str) -> Option<Vec<String>> {
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
+    if !parsed.errors.is_empty() {
+        return None;
+    }
+
+    let mut has_import = false;
+    let mut names = Vec::new();
+    for statement in &parsed.program.body {
+        let Statement::ImportDeclaration(declaration) = statement else {
+            continue;
+        };
+        has_import = true;
+        // `import "./side-effect.js"` binds nothing, and still has to run.
+        for specifier in declaration.specifiers.iter().flatten() {
+            let local = match specifier {
+                ImportDeclarationSpecifier::ImportSpecifier(s) => &s.local,
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => &s.local,
+                ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => &s.local,
+            };
+            names.push(local.name.to_string());
+        }
+    }
+
+    has_import.then_some(names)
+}
+
 pub fn is_typescript_file(filename: &str) -> bool {
     filename.ends_with(".ts") || filename.ends_with(".tsx")
 }
@@ -59,6 +96,80 @@ pub fn is_typescript_file(filename: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_import_bindings_none_without_imports() {
+        assert_eq!(import_bindings("1 + 1"), None);
+        assert_eq!(import_bindings("const x = 5;"), None);
+        assert_eq!(import_bindings("console.log('hi')"), None);
+    }
+
+    #[test]
+    fn test_import_bindings_named() {
+        assert_eq!(
+            import_bindings(r#"import { a, b } from "m";"#),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_import_bindings_uses_the_local_alias() {
+        // `b` is what the line actually binds; `a` is the export's name.
+        assert_eq!(
+            import_bindings(r#"import { a as b } from "m";"#),
+            Some(vec!["b".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_import_bindings_default_and_namespace() {
+        assert_eq!(
+            import_bindings(r#"import d from "m";"#),
+            Some(vec!["d".to_string()])
+        );
+        assert_eq!(
+            import_bindings(r#"import * as ns from "m";"#),
+            Some(vec!["ns".to_string()])
+        );
+        assert_eq!(
+            import_bindings(r#"import d, { a } from "m";"#),
+            Some(vec!["d".to_string(), "a".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_import_bindings_side_effect_only() {
+        // Binds nothing, but still has to run as a module.
+        assert_eq!(import_bindings(r#"import "m";"#), Some(vec![]));
+    }
+
+    #[test]
+    fn test_import_bindings_ignores_dynamic_import() {
+        // A call expression, not a declaration: it works in a script already.
+        assert_eq!(import_bindings(r#"import("m").then(f)"#), None);
+    }
+
+    #[test]
+    fn test_import_bindings_across_several_declarations() {
+        assert_eq!(
+            import_bindings("import { a } from \"m\";\nimport b from \"n\";"),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_import_bindings_none_for_unparseable_input() {
+        // Left to the engine, so the error is reported against the real line.
+        assert_eq!(import_bindings("import { from 'm'"), None);
+    }
+
+    #[test]
+    fn test_import_bindings_mixed_with_other_statements() {
+        assert_eq!(
+            import_bindings(r#"import { a } from "m"; const z = a + 1;"#),
+            Some(vec!["a".to_string()])
+        );
+    }
 
     #[test]
     fn test_strip_type_annotation() {
