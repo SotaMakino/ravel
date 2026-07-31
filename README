@@ -68,6 +68,11 @@ Usage
 `cargo build` only writes to target/debug/. Run `cargo install --path .`
 to update the `ravel` on your PATH.
 
+ravel.json in the working directory sets the base path and port. Scripts
+read the same base as `ravel.base`, always with a trailing slash, so a
+build script and the server that later serves its output cannot disagree
+about where the site lives.
+
 The examples in examples/ cover each feature and run as-is.
 
 Known limits

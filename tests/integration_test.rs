@@ -1819,3 +1819,90 @@ fn test_repl_module_is_evaluated_once() {
     );
     assert!(out.contains("cached"));
 }
+
+// --- ravel.base ---
+
+/// Run a script with the working directory set to its own project, so
+/// `ravel.json` is found the way it would be in a real project.
+fn run_in_project(name: &str, files: &[(&str, &str)]) -> (String, String) {
+    let dir = std::env::temp_dir().join(format!("ravel_base_{}", name));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for (path, contents) in files {
+        std::fs::write(dir.join(path), contents).unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .current_dir(&dir)
+        .arg("main.js")
+        .output()
+        .expect("Failed to execute ravel");
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
+}
+
+#[test]
+fn test_ravel_base_comes_from_the_config_file() {
+    let (out, err) = run_in_project(
+        "configured",
+        &[
+            ("ravel.json", r#"{"base": "/my-repo"}"#),
+            ("main.js", "console.log(ravel.base);"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert_eq!(out.trim(), "/my-repo/");
+}
+
+#[test]
+fn test_ravel_base_defaults_to_root() {
+    let (out, err) = run_in_project("default", &[("main.js", "console.log(ravel.base);")]);
+    assert_eq!(err, "");
+    assert_eq!(out.trim(), "/");
+}
+
+#[test]
+fn test_ravel_base_always_ends_in_a_slash() {
+    // Written without one; a <base href> lacking it resolves against the
+    // parent directory, so normalising here is what keeps links correct.
+    let (out, err) = run_in_project(
+        "slash",
+        &[
+            ("ravel.json", r#"{"base": "/no-slash"}"#),
+            ("main.js", "console.log(JSON.stringify(ravel.base));"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert_eq!(out.trim(), "\"/no-slash/\"");
+}
+
+#[test]
+fn test_site_build_uses_the_configured_base() {
+    // The regression this whole change is about: the build script and the
+    // server used to keep separate copies of the base and could drift.
+    let dir = std::env::temp_dir().join("ravel_base_site");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("ravel.json"), r#"{"base": "/elsewhere"}"#).unwrap();
+    std::fs::write(
+        dir.join("build.tsx"),
+        r#"fs.writeFileSync("dist/out.txt", ravel.base);"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .current_dir(&dir)
+        .args(["--build", "build.tsx"])
+        .output()
+        .expect("Failed to execute ravel");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let written = std::fs::read_to_string(dir.join("dist/out.txt")).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(written, "/elsewhere/");
+}

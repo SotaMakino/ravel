@@ -20,7 +20,7 @@ fn publish_bindings(line: &str, names: &[String]) -> String {
     source
 }
 
-pub fn repl() {
+pub fn repl(base: &str) {
     let mut rl = DefaultEditor::new().expect("Failed to initialize readline");
 
     let history_path = dirs::config_dir()
@@ -45,7 +45,7 @@ pub fn repl() {
             if let Err(e) = Engine::setup_all_apis(&ctx, &cwd) {
                 eprintln!("Environment setup error: {}", e);
             }
-            if let Err(e) = Engine::inject_globals(&ctx, "", &cwd_str, false) {
+            if let Err(e) = Engine::inject_globals(&ctx, "", &cwd_str, false, base) {
                 eprintln!("Global injection error: {}", e);
             }
         })

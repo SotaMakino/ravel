@@ -15,6 +15,9 @@ fn main() {
     }
 
     let config = Config::load();
+    // Read before anything changes directory: a build script runs with the
+    // cwd moved to its own folder, and ravel.json belongs to the project.
+    let base_url = config.base_url();
 
     if let Some(idx) = args.iter().position(|a| a == "--serve") {
         let port = args
@@ -35,7 +38,7 @@ fn main() {
 
     if args.iter().any(|a| a == "--build") {
         if positional.len() > 1 {
-            if !cli::build(positional[1]) {
+            if !cli::build(positional[1], &base_url) {
                 std::process::exit(1);
             }
         } else {
@@ -47,11 +50,11 @@ fn main() {
     }
 
     if positional.len() > 1 {
-        if !cli::run(positional[1]) {
+        if !cli::run(positional[1], &base_url) {
             std::process::exit(1);
         }
         return;
     }
 
-    cli::repl();
+    cli::repl(&base_url);
 }

@@ -40,6 +40,23 @@ impl Config {
     }
 }
 
+impl Config {
+    /// The base as a prefix for generated links: always starts and ends with
+    /// `/`, so joining is plain concatenation.
+    ///
+    /// The trailing slash is load-bearing. `<base href="/ravel">` resolves
+    /// relative URLs against the parent directory, not against `/ravel`, so
+    /// dropping it silently sends every asset one level too high.
+    pub fn base_url(&self) -> String {
+        let trimmed = self.base.trim_matches('/');
+        if trimmed.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}/", trimmed)
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -59,6 +76,49 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.base, "");
         assert_eq!(config.port, 3000);
+    }
+
+    #[test]
+    fn test_base_url_adds_the_trailing_slash() {
+        let c = Config {
+            base: "/ravel".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(c.base_url(), "/ravel/");
+    }
+
+    #[test]
+    fn test_base_url_is_root_when_unset() {
+        assert_eq!(Config::default().base_url(), "/");
+    }
+
+    #[test]
+    fn test_base_url_normalises_whatever_was_written() {
+        for written in ["/ravel", "ravel", "/ravel/", "ravel/", "//ravel//"] {
+            let c = Config {
+                base: written.to_string(),
+                ..Default::default()
+            };
+            assert_eq!(c.base_url(), "/ravel/", "for {:?}", written);
+        }
+    }
+
+    #[test]
+    fn test_base_url_keeps_nested_paths() {
+        let c = Config {
+            base: "/a/b".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(c.base_url(), "/a/b/");
+    }
+
+    #[test]
+    fn test_base_url_of_a_lone_slash_is_root() {
+        let c = Config {
+            base: "/".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(c.base_url(), "/");
     }
 
     #[test]

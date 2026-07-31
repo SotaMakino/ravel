@@ -6,15 +6,15 @@ use crate::error::{report_pending_rejections, report_uncaught};
 use super::read_and_transpile;
 
 /// Returns false if the build failed, so the caller can exit non-zero.
-pub fn build(filename: &str) -> bool {
+pub fn build(filename: &str, base: &str) -> bool {
     let source = match read_and_transpile(filename) {
         Some(s) => s,
         None => return false,
     };
-    build_source(&source, filename)
+    build_source(&source, filename, base)
 }
 
-pub fn build_source(source: &str, filename: &str) -> bool {
+pub fn build_source(source: &str, filename: &str, base: &str) -> bool {
     let original_dir = std::env::current_dir().expect("Failed to get current directory");
     let abs_path = std::path::Path::new(filename)
         .canonicalize()
@@ -41,7 +41,7 @@ pub fn build_source(source: &str, filename: &str) -> bool {
                 eprintln!("Environment setup error: {}", e);
                 ok = false;
             }
-            if let Err(e) = Engine::inject_globals(&ctx, &file, &dir, true) {
+            if let Err(e) = Engine::inject_globals(&ctx, &file, &dir, true, base) {
                 eprintln!("Global injection error: {}", e);
                 ok = false;
             }

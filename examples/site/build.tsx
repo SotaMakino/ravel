@@ -7,8 +7,6 @@
 
 import { Shell } from "./components.tsx";
 
-const BASE = "/ravel/";
-
 // Pinned, because an import map is a lockfile in disguise: nothing here is
 // resolved at build time, so the browser gets whatever these URLs say.
 //
@@ -95,7 +93,7 @@ if (!ravel.build) {
   const html = (
     <Shell
       title="ravel"
-      base={BASE}
+      base={ravel.base}
       version={ravel.version}
       importMap={JSON.stringify(IMPORT_MAP)}
     />

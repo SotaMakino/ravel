@@ -78,6 +78,7 @@ impl Engine {
         file: &str,
         dir: &str,
         build_mode: bool,
+        base: &str,
     ) -> Result<()> {
         let _: Result<()> = ctx.eval(format!("var __filename = {:?};", file));
         let _: Result<()> = ctx.eval(format!("var __dirname = {:?};", dir));
@@ -109,9 +110,11 @@ impl Engine {
         )?;
         ctx.globals().set("process", process)?;
 
+        // `base` comes from ravel.json, so a build script and the server that
+        // later serves it agree on one value instead of each keeping its own.
         let _: Result<()> = ctx.eval(format!(
-            "var ravel = {{ version: {:?}, build: {} }};",
-            RAVEL_VERSION, build_mode
+            "var ravel = {{ version: {:?}, build: {}, base: {:?} }};",
+            RAVEL_VERSION, build_mode, base
         ));
 
         Ok(())
@@ -141,7 +144,7 @@ mod tests {
     #[test]
     fn test_inject_globals_sets_filename() {
         with_ctx(|ctx| {
-            Engine::inject_globals(&ctx, "/path/to/file.js", "/path/to", false).unwrap();
+            Engine::inject_globals(&ctx, "/path/to/file.js", "/path/to", false, "/").unwrap();
             let filename: String = ctx.eval("__filename").unwrap();
             assert_eq!(filename, "/path/to/file.js");
         })
@@ -150,7 +153,7 @@ mod tests {
     #[test]
     fn test_inject_globals_sets_dirname() {
         with_ctx(|ctx| {
-            Engine::inject_globals(&ctx, "/path/to/file.js", "/path/to", false).unwrap();
+            Engine::inject_globals(&ctx, "/path/to/file.js", "/path/to", false, "/").unwrap();
             let dirname: String = ctx.eval("__dirname").unwrap();
             assert_eq!(dirname, "/path/to");
         })
@@ -159,7 +162,7 @@ mod tests {
     #[test]
     fn test_inject_globals_process_env_is_object() {
         with_ctx(|ctx| {
-            Engine::inject_globals(&ctx, "", "", false).unwrap();
+            Engine::inject_globals(&ctx, "", "", false, "/").unwrap();
             let typeof_env: String = ctx.eval("typeof process.env").unwrap();
             assert_eq!(typeof_env, "object");
         })
@@ -168,16 +171,25 @@ mod tests {
     #[test]
     fn test_inject_globals_ravel_version() {
         with_ctx(|ctx| {
-            Engine::inject_globals(&ctx, "", "", false).unwrap();
+            Engine::inject_globals(&ctx, "", "", false, "/").unwrap();
             let version: String = ctx.eval("ravel.version").unwrap();
             assert_eq!(version, RAVEL_VERSION);
         })
     }
 
     #[test]
+    fn test_inject_globals_exposes_base() {
+        with_ctx(|ctx| {
+            Engine::inject_globals(&ctx, "", "", false, "/my-repo/").unwrap();
+            let base: String = ctx.eval("ravel.base").unwrap();
+            assert_eq!(base, "/my-repo/");
+        })
+    }
+
+    #[test]
     fn test_inject_globals_build_mode_false() {
         with_ctx(|ctx| {
-            Engine::inject_globals(&ctx, "", "", false).unwrap();
+            Engine::inject_globals(&ctx, "", "", false, "/").unwrap();
             let build: bool = ctx.eval("ravel.build").unwrap();
             assert!(!build);
         })
@@ -186,7 +198,7 @@ mod tests {
     #[test]
     fn test_inject_globals_build_mode_true() {
         with_ctx(|ctx| {
-            Engine::inject_globals(&ctx, "", "", true).unwrap();
+            Engine::inject_globals(&ctx, "", "", true, "/").unwrap();
             let build: bool = ctx.eval("ravel.build").unwrap();
             assert!(build);
         })
@@ -195,7 +207,7 @@ mod tests {
     #[test]
     fn test_inject_globals_ravel_build_env_in_build_mode() {
         with_ctx(|ctx| {
-            Engine::inject_globals(&ctx, "", "", true).unwrap();
+            Engine::inject_globals(&ctx, "", "", true, "/").unwrap();
             let val: String = ctx.eval("process.env.RAVEL_BUILD").unwrap();
             assert_eq!(val, "1");
         })
@@ -204,7 +216,7 @@ mod tests {
     #[test]
     fn test_inject_globals_no_ravel_build_env_in_normal_mode() {
         with_ctx(|ctx| {
-            Engine::inject_globals(&ctx, "", "", false).unwrap();
+            Engine::inject_globals(&ctx, "", "", false, "/").unwrap();
             let result: rquickjs::Value = ctx.eval("process.env.RAVEL_BUILD").unwrap();
             assert!(
                 result.is_undefined(),
@@ -261,6 +273,7 @@ mod tests {
                 "/path/with \"quote/file.js",
                 "/path/with \"quote",
                 false,
+                "/",
             )
             .unwrap();
             let filename: String = ctx.eval("__filename").unwrap();

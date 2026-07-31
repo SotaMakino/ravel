@@ -6,15 +6,15 @@ use crate::error::{report_pending_rejections, report_uncaught};
 use super::read_and_transpile;
 
 /// Returns false if the script failed, so the caller can exit non-zero.
-pub fn run(filename: &str) -> bool {
+pub fn run(filename: &str, base: &str) -> bool {
     let source = match read_and_transpile(filename) {
         Some(s) => s,
         None => return false,
     };
-    run_source(&source, filename)
+    run_source(&source, filename, base)
 }
 
-pub fn run_source(source: &str, filename: &str) -> bool {
+pub fn run_source(source: &str, filename: &str, base: &str) -> bool {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
@@ -39,7 +39,7 @@ pub fn run_source(source: &str, filename: &str) -> bool {
                 eprintln!("Environment setup error: {}", e);
                 ok = false;
             }
-            if let Err(e) = Engine::inject_globals(&ctx, &file, &dir, false) {
+            if let Err(e) = Engine::inject_globals(&ctx, &file, &dir, false, base) {
                 eprintln!("Global injection error: {}", e);
                 ok = false;
             }
