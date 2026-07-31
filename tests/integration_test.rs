@@ -1572,6 +1572,28 @@ fn test_imports_map_can_alias_a_package() {
 }
 
 #[test]
+fn test_module_field_is_preferred_over_main() {
+    // The real-world pairing: main is CommonJS, module is the ESM build.
+    // Picking main hands ravel a file it cannot load at all, so this fails
+    // outright rather than merely picking the less good entry point.
+    let (out, err, code) = run_project(
+        "module_field",
+        &[
+            ("main.js", r#"import { v } from "dep"; console.log(v);"#),
+            (
+                "node_modules/dep/package.json",
+                r#"{"main": "./cjs.js", "module": "./esm.js"}"#,
+            ),
+            ("node_modules/dep/cjs.js", "module.exports = { v: 'cjs' };"),
+            ("node_modules/dep/esm.js", "export const v = 'esm';"),
+        ],
+    );
+    assert_eq!(err, "");
+    assert!(out.contains("esm"), "stdout was: {}", out);
+    assert_eq!(code, 0);
+}
+
+#[test]
 fn test_extensionless_relative_import_finds_typescript() {
     // Used to be a documented limit: ./helper never found helper.ts.
     let (out, err, _) = run_project(

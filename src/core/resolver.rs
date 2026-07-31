@@ -32,6 +32,13 @@ const EXTENSIONS: &[&str] = &["js", "mjs", "ts", "tsx"];
 #[derive(Debug, Default, Deserialize)]
 struct PackageJson {
     main: Option<String>,
+    /// How a package pointed at its ESM build before `exports` existed, while
+    /// `main` kept pointing at CommonJS for older tooling.
+    ///
+    /// Node ignores this field. ravel does not, because ravel loads ES modules
+    /// only: where both exist, the `main` beside it is the one entry point
+    /// ravel could never run.
+    module: Option<String>,
     /// Left as raw JSON: a target can be a string, null, an array of
     /// fallbacks, or an object of conditions, nested to any depth.
     exports: Option<Value>,
@@ -103,12 +110,18 @@ impl ModuleResolver {
         Err(format!("cannot find '{}'", tidy(path).display()))
     }
 
-    /// A directory means its package.json `main`, or failing that its index.
+    /// A directory means its package.json entry point, or failing that its
+    /// index.
     fn resolve_directory(&mut self, dir: &Path) -> Result<PathBuf, String> {
-        if let Some(main) = self.package_json(dir).and_then(|pkg| pkg.main.clone()) {
-            let target = dir.join(&main);
-            if let Some(file) = as_file(&target).or_else(|| index_of(&target)) {
-                return Ok(file);
+        if let Some(package) = self.package_json(dir) {
+            // `module` first: see the field's note. A field pointing at a file
+            // that is not there falls through to the next candidate rather
+            // than failing outright, which is how `main` already behaved.
+            for entry in [&package.module, &package.main].into_iter().flatten() {
+                let target = dir.join(entry);
+                if let Some(file) = as_file(&target).or_else(|| index_of(&target)) {
+                    return Ok(file);
+                }
             }
         }
         index_of(dir).ok_or_else(|| format!("no entry point in '{}'", tidy(dir).display()))
@@ -558,6 +571,80 @@ mod tests {
         let direct = resolve(&dir, "./lib.js").unwrap();
         let roundabout = resolve(&dir, "./nested/../lib.js").unwrap();
         assert_eq!(direct, roundabout);
+    }
+
+    #[test]
+    fn test_module_field_is_preferred_over_main() {
+        // The pairing that makes this matter: main is CommonJS, module is the
+        // ESM build. Picking main would hand ravel a file it cannot load.
+        let dir = tree(&[
+            (
+                "node_modules/dep/package.json",
+                r#"{"main": "./cjs.js", "module": "./esm.js"}"#,
+            ),
+            ("node_modules/dep/cjs.js", ""),
+            ("node_modules/dep/esm.js", ""),
+        ]);
+        assert_resolves(&dir, "dep", "node_modules/dep/esm.js");
+    }
+
+    #[test]
+    fn test_module_field_used_when_there_is_no_main() {
+        let dir = tree(&[
+            ("node_modules/dep/package.json", r#"{"module": "./esm.js"}"#),
+            ("node_modules/dep/esm.js", ""),
+        ]);
+        assert_resolves(&dir, "dep", "node_modules/dep/esm.js");
+    }
+
+    #[test]
+    fn test_main_is_used_when_there_is_no_module() {
+        let dir = tree(&[
+            ("node_modules/dep/package.json", r#"{"main": "./only.js"}"#),
+            ("node_modules/dep/only.js", ""),
+        ]);
+        assert_resolves(&dir, "dep", "node_modules/dep/only.js");
+    }
+
+    #[test]
+    fn test_exports_beats_module() {
+        // exports is the modern, authoritative map; module is the fallback
+        // for packages published before it existed.
+        let dir = tree(&[
+            (
+                "node_modules/dep/package.json",
+                r#"{"main": "./cjs.js", "module": "./esm.js", "exports": "./new.js"}"#,
+            ),
+            ("node_modules/dep/cjs.js", ""),
+            ("node_modules/dep/esm.js", ""),
+            ("node_modules/dep/new.js", ""),
+        ]);
+        assert_resolves(&dir, "dep", "node_modules/dep/new.js");
+    }
+
+    #[test]
+    fn test_module_pointing_at_nothing_falls_back_to_main() {
+        let dir = tree(&[
+            (
+                "node_modules/dep/package.json",
+                r#"{"main": "./real.js", "module": "./gone.js"}"#,
+            ),
+            ("node_modules/dep/real.js", ""),
+        ]);
+        assert_resolves(&dir, "dep", "node_modules/dep/real.js");
+    }
+
+    #[test]
+    fn test_module_field_applies_to_directory_imports_too() {
+        let dir = tree(&[
+            (
+                "utils/package.json",
+                r#"{"main": "./cjs.js", "module": "./esm.js"}"#,
+            ),
+            ("utils/cjs.js", ""),
+            ("utils/esm.js", ""),
+        ]);
+        assert_resolves(&dir, "./utils", "utils/esm.js");
     }
 
     #[test]

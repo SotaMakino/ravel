@@ -86,6 +86,10 @@ and "default", in that order. "node" is not one of them: ravel has no
 node builtins, so a package's node entry point is the one least likely
 to run here, and falling through to "default" picks the portable build.
 
+A package.json "module" field wins over "main". Node ignores that
+field entirely; ravel reads it because where a package ships both, the
+"main" beside it is the CommonJS build, which ravel cannot load.
+
 An extensionless import tries .js, .mjs, .ts, then .tsx, so ./foo finds
 foo.js before foo.ts. Node requires the extension in ESM; ravel does
 not, which makes ravel accept imports Node would reject.
