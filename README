@@ -37,6 +37,12 @@ JSX. Tokio drives timers and file I/O. Everything else is written here:
                 patterns and conditions. A package with an exports map
                 publishes only what that map names.
 
+  Dev server    --dev serves the project to a browser with no bundler.
+                An import map generated from node_modules teaches the
+                browser what a bare specifier means, and /@id/<name>
+                answers with a redirect to the real file. .ts is
+                transpiled on the way out.
+
   Sandbox       fs is scoped to the script's directory. Path traversal,
                 symlink escape, and null bytes are blocked.
 
@@ -59,6 +65,7 @@ Usage
 	ravel file.ts           run TypeScript
 	ravel                   start the REPL
 	ravel --build file.js   run once as a build task
+	ravel --dev             serve the project to a browser, unbundled
 	ravel --serve           serve dist/ over HTTP
 
 	cargo build             build to target/debug/ravel
@@ -103,6 +110,13 @@ field entirely; ravel reads it because where a package ships both, the
 An extensionless import tries .js, .mjs, .ts, then .tsx, so ./foo finds
 foo.js before foo.ts. Node requires the extension in ESM; ravel does
 not, which makes ravel accept imports Node would reject.
+
+--dev resolves with browser conditions, so a package's browser build
+wins where it offers one; ravel's own imports still resolve as ravel.
+It serves files from the project directory only, so a package hoisted to
+a node_modules above it has no URL and 404s. .tsx is transpiled for
+ravel's own JSX runtime, which does not exist in a browser, so a dev
+server page wanting JSX needs its own runtime for now.
 
 Delays under 1ms are rounded up to 1ms, as Node does. setTimeout(fn, 0)
 does not run fn on the next turn; it runs it a millisecond later.

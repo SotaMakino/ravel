@@ -1906,3 +1906,198 @@ fn test_site_build_uses_the_configured_base() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(written, "/elsewhere/");
 }
+
+// --- ravel --dev ---
+
+/// Start `ravel --dev` on `port` in a project of our making, run `check`
+/// against it, then stop the server whatever happened.
+fn with_dev_server<F: FnOnce(&dyn Fn(&str) -> String)>(
+    name: &str,
+    port: u16,
+    files: &[(&str, &str)],
+    check: F,
+) {
+    let dir = std::env::temp_dir().join(format!("ravel_dev_{}", name));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (path, contents) in files {
+        let full = dir.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, contents).unwrap();
+    }
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .args(["--dev", &port.to_string()])
+        .current_dir(&dir)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to start the dev server");
+
+    // Poll rather than sleep a fixed amount: the server is ready as soon as
+    // it accepts a connection.
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
+    let mut ready = false;
+    for _ in 0..100 {
+        if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100))
+            .is_ok()
+        {
+            ready = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(ready, "dev server never came up on {}", port);
+
+    let get = |path: &str| -> String {
+        let mut stream =
+            std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2))
+                .expect("Failed to connect");
+        stream
+            .write_all(
+                format!(
+                    "GET {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    path
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let mut response = Vec::new();
+        let _ = stream.read_to_end(&mut response);
+        String::from_utf8_lossy(&response).to_string()
+    };
+
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(&get)));
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+const DEV_PROJECT: &[(&str, &str)] = &[
+    (
+        "index.html",
+        "<!doctype html><html><head><title>t</title></head><body></body></html>",
+    ),
+    ("app.ts", "export const n: number = 41 + 1;"),
+    (
+        "node_modules/dep/package.json",
+        r#"{"exports": {".": {"browser": "./b.js", "default": "./d.js"}, "./sub": "./s.js"}}"#,
+    ),
+    ("node_modules/dep/b.js", "export const which = 'browser';"),
+    ("node_modules/dep/d.js", "export const which = 'default';"),
+    ("node_modules/dep/s.js", "export const sub = true;"),
+    (
+        "node_modules/@scope/pkg/package.json",
+        r#"{"exports": {"./*": "./src/*.js"}}"#,
+    ),
+    ("node_modules/@scope/pkg/src/thing.js", "export const v = 1;"),
+];
+
+#[test]
+fn test_dev_injects_an_import_map() {
+    with_dev_server("map", 18801, DEV_PROJECT, |get| {
+        let page = get("/");
+        assert!(page.contains("importmap"), "no import map: {}", page);
+        assert!(page.contains(r#""dep": "/@id/dep""#), "page: {}", page);
+        assert!(page.contains(r#""dep/": "/@id/dep/""#), "page: {}", page);
+        assert!(page.contains(r#""@scope/pkg": "/@id/@scope/pkg""#), "page: {}", page);
+        // Before </head>, so it is parsed ahead of any module script.
+        let map_at = page.find("importmap").unwrap();
+        let head_end = page.find("</head>").unwrap();
+        assert!(map_at < head_end, "map landed after </head>");
+    });
+}
+
+#[test]
+fn test_dev_redirects_a_bare_specifier_to_its_file() {
+    with_dev_server("redirect", 18802, DEV_PROJECT, |get| {
+        let response = get("/@id/dep");
+        assert!(response.contains("302"), "response: {}", response);
+        // The browser condition is claimed, so this is b.js and not d.js.
+        assert!(
+            response.contains("/node_modules/dep/b.js"),
+            "response: {}",
+            response
+        );
+    });
+}
+
+#[test]
+fn test_dev_resolves_subpaths_and_patterns() {
+    with_dev_server("subpaths", 18803, DEV_PROJECT, |get| {
+        assert!(
+            get("/@id/dep/sub").contains("/node_modules/dep/s.js"),
+            "explicit subpath did not resolve"
+        );
+        assert!(
+            get("/@id/@scope/pkg/thing").contains("/node_modules/@scope/pkg/src/thing.js"),
+            "pattern subpath did not resolve"
+        );
+    });
+}
+
+#[test]
+fn test_dev_serves_typescript_as_javascript() {
+    with_dev_server("ts", 18804, DEV_PROJECT, |get| {
+        let response = get("/app.ts");
+        assert!(
+            response.contains("application/javascript"),
+            "wrong content type: {}",
+            response
+        );
+        assert!(response.contains("export const n = 41 + 1"), "{}", response);
+        assert!(!response.contains(": number"), "types were not stripped");
+    });
+}
+
+#[test]
+fn test_dev_probes_extensions_for_a_bare_path() {
+    with_dev_server("ext", 18805, DEV_PROJECT, |get| {
+        // `import "./app"` in a browser asks for /app with no extension.
+        assert!(get("/app").contains("export const n"), "extension not probed");
+    });
+}
+
+#[test]
+fn test_dev_reports_an_unresolvable_specifier() {
+    with_dev_server("missing", 18806, DEV_PROJECT, |get| {
+        let response = get("/@id/nope");
+        assert!(response.contains("404"), "response: {}", response);
+        assert!(response.contains("cannot resolve"), "response: {}", response);
+    });
+}
+
+#[test]
+fn test_dev_refuses_to_escape_the_project() {
+    with_dev_server("traversal", 18807, DEV_PROJECT, |get| {
+        assert!(
+            get("/../../../etc/passwd").contains("404"),
+            "traversal was not refused"
+        );
+    });
+}
+
+#[test]
+fn test_dev_requires_an_index_html() {
+    let dir = std::env::temp_dir().join("ravel_dev_noindex");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ravel"))
+        .args(["--dev", "18808"])
+        .current_dir(&dir)
+        .output()
+        .expect("Failed to run ravel");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("no index.html"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

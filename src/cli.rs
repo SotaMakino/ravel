@@ -1,9 +1,11 @@
 mod build;
+mod dev;
 mod repl;
 mod run;
 mod serve;
 
 pub use build::{build, build_source};
+pub use dev::dev;
 pub use repl::repl;
 pub use run::{run, run_source};
 pub use serve::serve;
@@ -19,6 +21,7 @@ pub fn print_help() {
     println!("Options:");
     println!("  --help, -h         Show this help message");
     println!("  --version, -v      Show version information");
+    println!("  --dev [PORT]       Serve the project to a browser, unbundled (default port: 3000)");
     println!("  --serve [PORT]     Serve the dist/ directory (default port: 3000)");
     println!("  --base <PATH>      Base path prefix to strip when serving (e.g. /repo-name)");
     println!("  --build <FILE>     Run script in SSG build mode (one-off, no timers)");

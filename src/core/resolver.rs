@@ -16,14 +16,21 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-/// Conditions ravel matches in `exports` and `imports`, most specific first.
+/// Conditions ravel claims when resolving for itself.
+///
+/// A claim about the environment, not a priority list: which one wins is
+/// decided by the order the package.json writes its keys. `default` always
+/// matches and is handled separately, being a fallback rather than a claim.
 ///
 /// `node` is deliberately absent. ravel has no node builtins, so a package's
 /// node entry point is the one least likely to run here; letting it fall
-/// through to `default` picks the portable build instead. `default` always
-/// matches and is handled separately, because it is a fallback rather than a
-/// claim about the environment.
-const CONDITIONS: &[&str] = &["ravel", "import"];
+/// through to `default` picks the portable build instead.
+pub const RUNTIME_CONDITIONS: &[&str] = &["ravel", "import"];
+
+/// Conditions claimed when resolving on behalf of a browser, as the dev server
+/// does. The code is going somewhere with a DOM and no filesystem, so the
+/// package's browser build is the one that will actually run.
+pub const BROWSER_CONDITIONS: &[&str] = &["browser", "module", "import"];
 
 /// Extensions tried when a specifier has none, in order. `.js` stays first so
 /// `./utils` keeps meaning `utils.js` when `utils.ts` sits beside it.
@@ -49,6 +56,9 @@ pub struct ModuleResolver {
     /// Where the entry module lives. Used when the importer has no directory
     /// of its own, which is the case for the entry module itself.
     root: PathBuf,
+    /// Conditions to claim in `exports` and `imports`. Held rather than fixed
+    /// so one resolver can answer for ravel and another for a browser.
+    conditions: &'static [&'static str],
     /// package.json contents by directory. A deep import chain asks about the
     /// same handful of packages over and over, and none of them change while
     /// the process runs.
@@ -56,9 +66,16 @@ pub struct ModuleResolver {
 }
 
 impl ModuleResolver {
+    /// A resolver answering as ravel itself.
     pub fn new(root: &Path) -> Self {
+        Self::with_conditions(root, RUNTIME_CONDITIONS)
+    }
+
+    /// A resolver answering for some other environment, such as a browser.
+    pub fn with_conditions(root: &Path, conditions: &'static [&'static str]) -> Self {
         Self {
             root: root.to_path_buf(),
+            conditions,
             packages: HashMap::new(),
         }
     }
@@ -191,16 +208,18 @@ impl ModuleResolver {
                 if subpath != "." {
                     return Err(not_exported(specifier, pkg_dir));
                 }
-                select_target(exports, None)
+                select_target(exports, None, self.conditions)
             }
             Value::Object(map) if !is_subpath_map(map) => {
                 if subpath != "." {
                     return Err(not_exported(specifier, pkg_dir));
                 }
-                select_target(exports, None)
+                select_target(exports, None, self.conditions)
             }
             Value::Object(map) => match match_subpath(map, subpath) {
-                Some((entry, wildcard)) => select_target(entry, wildcard.as_deref()),
+                Some((entry, wildcard)) => {
+                    select_target(entry, wildcard.as_deref(), self.conditions)
+                }
                 None => return Err(not_exported(specifier, pkg_dir)),
             },
             _ => None,
@@ -247,7 +266,7 @@ impl ModuleResolver {
                 pkg_dir.display()
             ));
         };
-        let Some(target) = select_target(entry, wildcard.as_deref()) else {
+        let Some(target) = select_target(entry, wildcard.as_deref(), self.conditions) else {
             return Err(format!(
                 "'{}' has no target matching this runtime's conditions",
                 specifier
@@ -419,20 +438,20 @@ fn match_subpath<'a>(
 /// Conditions are tried in the order the package.json lists them, which is why
 /// `"default"` belongs last: whoever writes the map decides the priority, not
 /// us. `null` means the target is deliberately unavailable.
-fn select_target(target: &Value, wildcard: Option<&str>) -> Option<String> {
+fn select_target(target: &Value, wildcard: Option<&str>, conditions: &[&str]) -> Option<String> {
     match target {
         Value::String(literal) => Some(match wildcard {
             Some(value) => literal.replace('*', value),
             None => literal.clone(),
         }),
-        Value::Object(conditions) => conditions
+        Value::Object(map) => map
             .iter()
-            .filter(|(key, _)| key.as_str() == "default" || CONDITIONS.contains(&key.as_str()))
-            .find_map(|(_, entry)| select_target(entry, wildcard)),
+            .filter(|(key, _)| key.as_str() == "default" || conditions.contains(&key.as_str()))
+            .find_map(|(_, entry)| select_target(entry, wildcard, conditions)),
         // A list of fallbacks: the first one we understand wins.
         Value::Array(entries) => entries
             .iter()
-            .find_map(|entry| select_target(entry, wildcard)),
+            .find_map(|entry| select_target(entry, wildcard, conditions)),
         _ => None,
     }
 }
@@ -955,6 +974,74 @@ mod tests {
         assert_resolves(&dir, "dep", "node_modules/dep/fallback.js");
     }
 
+    // -- browser conditions -----------------------------------------------
+
+    fn resolve_for_browser(dir: &TempDir, specifier: &str) -> Result<PathBuf, String> {
+        let root = dir.path().canonicalize().unwrap();
+        let base = root.join("main.js");
+        ModuleResolver::with_conditions(&root, BROWSER_CONDITIONS)
+            .resolve(base.to_str().unwrap(), specifier)
+    }
+
+    #[test]
+    fn test_browser_conditions_pick_the_browser_build() {
+        let dir = tree(&[
+            (
+                "node_modules/dep/package.json",
+                r#"{"exports": {"browser": "./b.js", "node": "./n.js", "default": "./d.js"}}"#,
+            ),
+            ("node_modules/dep/b.js", ""),
+            ("node_modules/dep/n.js", ""),
+            ("node_modules/dep/d.js", ""),
+        ]);
+        let got = resolve_for_browser(&dir, "dep").unwrap();
+        assert_eq!(
+            got,
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("node_modules/dep/b.js")
+        );
+    }
+
+    #[test]
+    fn test_runtime_conditions_skip_the_browser_build() {
+        // The same package, resolved for ravel: "browser" is not claimed, so
+        // this falls through to "default" instead.
+        let dir = tree(&[
+            (
+                "node_modules/dep/package.json",
+                r#"{"exports": {"browser": "./b.js", "node": "./n.js", "default": "./d.js"}}"#,
+            ),
+            ("node_modules/dep/b.js", ""),
+            ("node_modules/dep/n.js", ""),
+            ("node_modules/dep/d.js", ""),
+        ]);
+        assert_resolves(&dir, "dep", "node_modules/dep/d.js");
+    }
+
+    #[test]
+    fn test_browser_conditions_still_prefer_the_package_order() {
+        // Priority remains the package's, not ours: "import" is written first
+        // and wins even though "browser" is also claimed.
+        let dir = tree(&[
+            (
+                "node_modules/dep/package.json",
+                r#"{"exports": {"import": "./i.js", "browser": "./b.js"}}"#,
+            ),
+            ("node_modules/dep/i.js", ""),
+            ("node_modules/dep/b.js", ""),
+        ]);
+        let got = resolve_for_browser(&dir, "dep").unwrap();
+        assert_eq!(
+            got,
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("node_modules/dep/i.js")
+        );
+    }
+
     // -- imports ----------------------------------------------------------
 
     #[test]
@@ -1064,21 +1151,24 @@ mod tests {
     fn test_select_target_skips_unknown_conditions() {
         let target: Value =
             serde_json::from_str(r#"{"deno": "./d.js", "import": "./i.js"}"#).unwrap();
-        assert_eq!(select_target(&target, None).as_deref(), Some("./i.js"));
+        assert_eq!(
+            select_target(&target, None, RUNTIME_CONDITIONS).as_deref(),
+            Some("./i.js")
+        );
     }
 
     #[test]
     fn test_select_target_substitutes_every_star() {
         let target = Value::String("./src/*/index-*.js".to_string());
         assert_eq!(
-            select_target(&target, Some("thing")).as_deref(),
+            select_target(&target, Some("thing"), RUNTIME_CONDITIONS).as_deref(),
             Some("./src/thing/index-thing.js")
         );
     }
 
     #[test]
     fn test_select_target_rejects_null() {
-        assert_eq!(select_target(&Value::Null, None), None);
+        assert_eq!(select_target(&Value::Null, None, RUNTIME_CONDITIONS), None);
     }
 
     #[test]
